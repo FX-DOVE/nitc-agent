@@ -1059,6 +1059,8 @@
       renderMessagesFromHistory();
       setView("chat");
       input.focus();
+      // Reconnect to any in-flight or just-finished server job for this bot
+      resumeActiveJobsForBot();
     }
 
     function persistActiveChat() {
@@ -1072,6 +1074,265 @@
       bot.snippet = String(snip || "").replace(/\s+/g, " ").slice(0, 80);
       saveBots();
       renderBotsList();
+    }
+
+    /** Active job ids being polled for the current bot (survives brief disconnects). */
+    let activeJobPolls = {};
+    let reconnectAttempted = {};
+
+    function sleep(ms) {
+      return new Promise((r) => setTimeout(r, ms));
+    }
+
+    async function fetchJob(jobId) {
+      const r = await fetch("/api/jobs/" + encodeURIComponent(jobId), {
+        method: "GET",
+        cache: "no-store",
+      });
+      if (r.status === 404) return null;
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({}));
+        throw new Error((err && err.detail) || ("Job status " + r.status));
+      }
+      return await r.json();
+    }
+
+    async function createChatJob(apiMessages, attachments) {
+      const sid = activeBotId || "default";
+      const r = await fetch("/api/jobs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          messages: apiMessages,
+          attachments: (attachments || []).map((a) => ({
+            id: a.id,
+            path: a.path,
+            name: a.name,
+            mime: a.mime,
+            size: a.size,
+            url: a.url,
+          })),
+          session_id: sid,
+          bot_id: sid,
+        }),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        throw new Error((data && data.detail) || ("Error " + r.status));
+      }
+      if (!data.job_id) throw new Error("Server did not return job_id");
+      return data;
+    }
+
+    /**
+     * Poll until job completes. Safe across client disconnects — server keeps working.
+     * Returns final job object or throws only on hard failures.
+     */
+    async function waitForJob(jobId, opts) {
+      const onUpdate = (opts && opts.onUpdate) || null;
+      const maxMs = (opts && opts.maxMs) || 30 * 60 * 1000;
+      const start = Date.now();
+      let delay = 600;
+      activeJobPolls[jobId] = true;
+      try {
+        while (Date.now() - start < maxMs) {
+          let job = null;
+          try {
+            job = await fetchJob(jobId);
+          } catch (err) {
+            // Transient network blip — keep polling; do NOT surface Load failed
+            if (onUpdate) onUpdate({ status: "running", transient_error: String(err.message || err) });
+            await sleep(delay);
+            delay = Math.min(delay * 1.4, 4000);
+            continue;
+          }
+          if (!job) {
+            throw new Error("Job not found on server");
+          }
+          if (onUpdate) onUpdate(job);
+          if (job.status === "completed" || job.status === "failed" || job.status === "cancelled") {
+            return job;
+          }
+          await sleep(delay);
+          delay = Math.min(delay + 200, 2500);
+        }
+        // Timed out waiting on client — job may still be running server-side
+        const last = await fetchJob(jobId).catch(() => null);
+        if (last && (last.status === "completed" || last.status === "failed")) return last;
+        throw new Error("Still working on the server — reopen this chat to see the result.");
+      } finally {
+        delete activeJobPolls[jobId];
+      }
+    }
+
+    function rememberBotJob(jobId, status) {
+      const bot = getActiveBot();
+      if (!bot) return;
+      bot.activeJobId = status === "completed" || status === "failed" || status === "cancelled" ? null : jobId;
+      bot.lastJobId = jobId;
+      saveBots();
+    }
+
+    async function runJobAndRender(apiMessages, attachments, thinkingEl) {
+      const created = await createChatJob(apiMessages, attachments);
+      const jobId = created.job_id;
+      rememberBotJob(jobId, "queued");
+      const bot = getActiveBot();
+      if (bot) {
+        bot.pendingJobId = jobId;
+        saveBots();
+      }
+
+      const job = await waitForJob(jobId, {
+        onUpdate: (j) => {
+          if (j && j.status) rememberBotJob(jobId, j.status);
+        },
+      });
+
+      if (thinkingEl && thinkingEl.remove) thinkingEl.remove();
+      setWorking(false);
+
+      if (job.status === "failed") {
+        const err = job.error || job.reply || "Job failed";
+        appendMessage("assistant", String(err));
+        history.push({ role: "assistant", content: String(err), job_id: jobId, failed: true });
+        persistActiveChat();
+        rememberBotJob(jobId, "failed");
+        return job;
+      }
+
+      const reply = job.reply || "";
+      const images = Array.isArray(job.images) ? job.images : [];
+      const extra = job.tool_rounds ? "tool rounds: " + job.tool_rounds : null;
+      appendMessage("assistant", reply, extra, images);
+      history.push({ role: "assistant", content: reply, images, job_id: jobId });
+      persistActiveChat();
+      rememberBotJob(jobId, "completed");
+      const b = getActiveBot();
+      if (b) {
+        b.pendingJobId = null;
+        saveBots();
+      }
+      return job;
+    }
+
+    async function resumeActiveJobsForBot() {
+      const bot = getActiveBot();
+      if (!bot) return;
+      const jobId = bot.activeJobId || bot.pendingJobId || bot.lastJobId;
+      if (!jobId) {
+        // Also ask server for session active jobs (cross-device)
+        try {
+          const r = await fetch("/api/sessions/" + encodeURIComponent(bot.id), { cache: "no-store" });
+          if (r.ok) {
+            const data = await r.json();
+            const active = (data.active_jobs || [])[0];
+            if (active && active.job_id) {
+              bot.activeJobId = active.job_id;
+              saveBots();
+              return resumeActiveJobsForBot();
+            }
+            // If last recent job completed and history missing assistant — hydrate
+            const recent = (data.recent_jobs || []).find((j) => j.status === "completed" && j.reply);
+            if (recent && recent.reply) {
+              const already = history.some((m) => m.job_id === recent.job_id);
+              if (!already) {
+                const last = history[history.length - 1];
+                if (!last || last.role !== "assistant" || last.content !== recent.reply) {
+                  appendMessage("assistant", recent.reply, null, recent.images || []);
+                  history.push({
+                    role: "assistant",
+                    content: recent.reply,
+                    images: recent.images || [],
+                    job_id: recent.job_id,
+                  });
+                  persistActiveChat();
+                }
+              }
+            }
+          }
+        } catch (_) {}
+        return;
+      }
+      if (reconnectAttempted[jobId]) return;
+      reconnectAttempted[jobId] = true;
+      if (sending) return;
+
+      let job = null;
+      try {
+        job = await fetchJob(jobId);
+      } catch (_) {
+        reconnectAttempted[jobId] = false;
+        return;
+      }
+      if (!job) {
+        bot.activeJobId = null;
+        bot.pendingJobId = null;
+        saveBots();
+        return;
+      }
+
+      if (job.status === "queued" || job.status === "running") {
+        sending = true;
+        sendBtn.disabled = true;
+        setWorking(true);
+        const thinking = appendMessage("assistant", "__thinking__");
+        try {
+          const done = await waitForJob(jobId);
+          thinking.remove();
+          setWorking(false);
+          // Avoid duplicating if already in history
+          const already = history.some((m) => m.job_id === jobId && m.role === "assistant");
+          if (!already) {
+            if (done.status === "failed") {
+              const err = done.error || done.reply || "Job failed";
+              appendMessage("assistant", String(err));
+              history.push({ role: "assistant", content: String(err), job_id: jobId, failed: true });
+            } else {
+              const reply = done.reply || "";
+              const images = Array.isArray(done.images) ? done.images : [];
+              appendMessage("assistant", reply, null, images);
+              history.push({ role: "assistant", content: reply, images, job_id: jobId });
+            }
+            persistActiveChat();
+          }
+          rememberBotJob(jobId, done.status);
+        } catch (err) {
+          thinking.remove();
+          setWorking(false);
+          appendMessage(
+            "system",
+            "Reconnecting… The server is still working. " + String(err.message || err)
+          );
+        } finally {
+          sending = false;
+          sendBtn.disabled = false;
+          updateSendMode();
+          reconnectAttempted[jobId] = false;
+        }
+        return;
+      }
+
+      // Completed/failed while we were away
+      const already = history.some((m) => m.job_id === jobId && m.role === "assistant");
+      if (!already && (job.reply || job.error)) {
+        if (job.status === "failed") {
+          const err = job.error || job.reply || "Job failed";
+          appendMessage("assistant", String(err));
+          history.push({ role: "assistant", content: String(err), job_id: jobId, failed: true });
+        } else {
+          appendMessage("assistant", job.reply || "", null, job.images || []);
+          history.push({
+            role: "assistant",
+            content: job.reply || "",
+            images: job.images || [],
+            job_id: jobId,
+          });
+        }
+        persistActiveChat();
+      }
+      rememberBotJob(jobId, job.status);
+      reconnectAttempted[jobId] = false;
     }
 
     function renderMessagesFromHistory() {
@@ -1869,23 +2130,9 @@
           role: m.role,
           content: typeof m.content === "string" ? m.content : String(m.content || ""),
         }));
-        const r = await fetch("/api/chat", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ messages: apiMessages, attachments: [] }),
-        });
-        const data = await r.json().catch(() => ({}));
-        thinking.remove();
-        if (!r.ok) {
-          appendMessage("system", (data && data.detail) || ("Error " + r.status));
-        } else {
-          const reply = data.reply || "";
-          appendMessage("assistant", reply, data.images || null);
-          history.push({ role: "assistant", content: reply });
-          persistActiveChat();
-        }
+        await runJobAndRender(apiMessages, [], thinking);
       } catch (err) {
-        thinking.remove();
+        if (thinking && thinking.parentNode) thinking.remove();
         appendMessage("system", String(err && err.message || err));
       } finally {
         sending = false;
@@ -2392,43 +2639,87 @@
           role: m.role,
           content: typeof m.content === "string" ? m.content : String(m.content || ""),
         }));
-        const r = await fetch("/api/chat", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            messages: apiMessages,
-            attachments: atts.map((a) => ({
-              id: a.id,
-              path: a.path,
-              name: a.name,
-              mime: a.mime,
-              size: a.size,
-              url: a.url,
-            })),
-          }),
-        });
-        const data = await r.json();
-        thinking.remove();
-        setWorking(false);
-        if (!r.ok) {
-          const err = data.detail || JSON.stringify(data);
-          appendMessage("assistant", err);
-          history.push({ role: "assistant", content: String(err) });
-        } else {
-          const extra = data.tool_rounds ? "tool rounds: " + data.tool_rounds : null;
-          const images = Array.isArray(data.images) ? data.images : [];
-          appendMessage("assistant", data.reply, extra, images);
-          history.push({ role: "assistant", content: data.reply, images });
-        }
-        persistActiveChat();
+        // Durable job: short POST, then poll — server keeps working if client drops
+        await runJobAndRender(apiMessages, atts, thinking);
       } catch (err) {
-        thinking.remove();
+        if (thinking && thinking.parentNode) thinking.remove();
         setWorking(false);
-        appendMessage("assistant", "Network error: " + err.message);
+        const msg = String(err && err.message || err);
+        // Prefer reconnect messaging over raw "Load failed"
+        if (/load failed|failed to fetch|networkerror|network error/i.test(msg)) {
+          appendMessage(
+            "system",
+            "Connection interrupted. The server may still be working — reopen this chat or tap Try again."
+          );
+          const retry = document.createElement("button");
+          retry.type = "button";
+          retry.className = "chip";
+          retry.textContent = "Try again";
+          retry.style.margin = "8px 12px";
+          retry.addEventListener("click", async () => {
+            retry.disabled = true;
+            const bot = getActiveBot();
+            const jid = bot && (bot.activeJobId || bot.pendingJobId || bot.lastJobId);
+            if (jid) {
+              reconnectAttempted[jid] = false;
+              await resumeActiveJobsForBot();
+              if (!sending) {
+                // Server job gone — create a fresh retry job from last user turn
+                const lastJob = jid && (await fetchJob(jid).catch(() => null));
+                if (lastJob && (lastJob.status === "failed" || lastJob.status === "completed")) {
+                  sending = true;
+                  setWorking(true);
+                  const th = appendMessage("assistant", "__thinking__");
+                  try {
+                    const rr = await fetch("/api/jobs/" + encodeURIComponent(jid) + "/retry", { method: "POST" });
+                    const nd = await rr.json().catch(() => ({}));
+                    if (rr.ok && nd.job_id) {
+                      rememberBotJob(nd.job_id, "queued");
+                      const done = await waitForJob(nd.job_id);
+                      th.remove();
+                      setWorking(false);
+                      if (done.status === "failed") {
+                        appendMessage("assistant", done.error || done.reply || "Retry failed");
+                      } else {
+                        appendMessage("assistant", done.reply || "", null, done.images || []);
+                        history.push({
+                          role: "assistant",
+                          content: done.reply || "",
+                          images: done.images || [],
+                          job_id: done.job_id || nd.job_id,
+                        });
+                        persistActiveChat();
+                      }
+                    } else {
+                      th.remove();
+                      setWorking(false);
+                      appendMessage("system", (nd && nd.detail) || "Retry failed");
+                    }
+                  } catch (e2) {
+                    th.remove();
+                    setWorking(false);
+                    appendMessage("system", String(e2.message || e2));
+                  } finally {
+                    sending = false;
+                    sendBtn.disabled = false;
+                    updateSendMode();
+                  }
+                }
+              }
+            } else {
+              appendMessage("system", "No active job to resume — send your message again.");
+            }
+            retry.remove();
+          });
+          messagesEl.appendChild(retry);
+        } else {
+          appendMessage("system", msg);
+        }
       } finally {
         sending = false;
         sendBtn.disabled = false;
         input.focus();
+        updateSendMode();
       }
     });
 

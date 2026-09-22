@@ -3,15 +3,17 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import re
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
 import httpx
 import websockets
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from starlette.websockets import WebSocketState
@@ -20,6 +22,7 @@ from app import __version__
 from app.agent import chat as agent_chat
 from app.attachments import MAX_UPLOAD_BYTES, resolve_upload, save_upload, uploads_root
 from app.config import get_settings
+from app import jobs as jobstore
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 logger = logging.getLogger("nitc.main")
@@ -38,10 +41,17 @@ _HOP_BY_HOP = {
     "content-length",
 }
 
+@asynccontextmanager
+async def _lifespan(_app: FastAPI):
+    await jobstore.recover_queued_jobs()
+    yield
+
+
 app = FastAPI(
     title="Nitc Agent",
     description="Self-hosted AI agent with shell, files, interactive desktop, browser, and GitHub tools.",
     version=__version__,
+    lifespan=_lifespan,
 )
 
 
@@ -69,6 +79,21 @@ class ChatRequest(BaseModel):
         default_factory=list,
         description="Files previously uploaded via /api/uploads; applied to the latest user turn",
     )
+    session_id: str | None = Field(
+        default=None,
+        description="Client bot/session id for durable history mirroring",
+    )
+    bot_id: str | None = Field(
+        default=None,
+        description="Alias for session_id (multi-bot UI)",
+    )
+
+
+class JobCreateResponse(BaseModel):
+    job_id: str
+    status: str = "queued"
+    session_id: str | None = None
+    bot_id: str | None = None
 
 
 class ChatResponse(BaseModel):
@@ -101,6 +126,8 @@ async def health() -> dict[str, Any]:
         "novnc_public_url": settings.novnc_public_url,
         "novnc_embed_url": _novnc_embed_url(),
         "max_upload_bytes": MAX_UPLOAD_BYTES,
+        "jobs": True,
+        "async_chat": True,
     }
 
 
@@ -237,6 +264,156 @@ async def api_chat(body: ChatRequest) -> ChatResponse:
         messages=result.get("messages", []),
         images=result.get("images", []),
     )
+
+
+def _clean_messages(body: ChatRequest) -> list[dict[str, Any]]:
+    messages: list[dict[str, Any]] = []
+    for m in body.messages:
+        messages.append({"role": m.role, "content": m.content})
+    if body.message:
+        messages.append({"role": "user", "content": body.message})
+    if not messages:
+        raise HTTPException(status_code=400, detail="Provide messages or message")
+
+    cleaned: list[dict[str, Any]] = []
+    for m in messages:
+        role = m.get("role")
+        content = m.get("content")
+        if role not in ("user", "assistant"):
+            continue
+        if isinstance(content, str):
+            cleaned.append({"role": role, "content": content})
+        elif isinstance(content, list):
+            cleaned.append({"role": role, "content": content})
+        else:
+            cleaned.append({"role": role, "content": str(content or "")})
+
+    if not cleaned or cleaned[-1]["role"] != "user":
+        raise HTTPException(status_code=400, detail="Last message must be from user")
+    return cleaned
+
+
+def _valid_attachments(body: ChatRequest) -> list[dict[str, Any]]:
+    att_dicts = [a.model_dump(exclude_none=True) for a in body.attachments]
+    if not att_dicts:
+        return []
+    valid = []
+    for a in att_dicts:
+        if resolve_upload(a) is not None or a.get("path") or a.get("id"):
+            valid.append(a)
+    return valid
+
+
+@app.post("/api/jobs", response_model=JobCreateResponse)
+@app.post("/api/chat/async", response_model=JobCreateResponse)
+async def api_create_job(body: ChatRequest) -> JobCreateResponse:
+    """Accept a chat turn immediately; agent runs on the server in the background."""
+    cleaned = _clean_messages(body)
+    att_dicts = _valid_attachments(body)
+    sid = (body.bot_id or body.session_id or "default").strip() or "default"
+    job = jobstore.create_job(
+        messages=cleaned,
+        attachments=att_dicts or None,
+        session_id=sid,
+        bot_id=sid,
+    )
+    jobstore.enqueue_job(job["id"])
+    return JobCreateResponse(
+        job_id=job["id"],
+        status=job["status"],
+        session_id=sid,
+        bot_id=sid,
+    )
+
+
+@app.get("/api/jobs")
+async def api_list_jobs(
+    session_id: str | None = None,
+    bot_id: str | None = None,
+    status: str | None = None,
+    limit: int = 50,
+) -> dict[str, Any]:
+    sid = bot_id or session_id
+    items = jobstore.list_jobs(session_id=sid, limit=min(max(limit, 1), 100), status=status)
+    return {"jobs": items}
+
+
+@app.get("/api/jobs/{job_id}")
+async def api_get_job(job_id: str) -> dict[str, Any]:
+    job = jobstore.load_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return jobstore.public_job(job)
+
+
+@app.get("/api/jobs/{job_id}/events")
+async def api_job_events(job_id: str, request: Request) -> StreamingResponse:
+    """SSE stream of job status until completed/failed/cancelled."""
+    job = jobstore.load_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    async def event_gen():
+        last_status = None
+        last_reply = None
+        for _ in range(1800):  # ~30 min at 1s
+            if await request.is_disconnected():
+                break
+            current = jobstore.load_job(job_id)
+            if not current:
+                yield "event: error\ndata: {\"detail\":\"missing\"}\n\n"
+                break
+            status = current.get("status")
+            reply = current.get("reply") or current.get("partial_reply") or ""
+            if status != last_status or reply != last_reply:
+                payload = json.dumps(jobstore.public_job(current), ensure_ascii=False)
+                yield f"event: job\ndata: {payload}\n\n"
+                last_status = status
+                last_reply = reply
+            if status in ("completed", "failed", "cancelled"):
+                break
+            await asyncio.sleep(1.0)
+
+    return StreamingResponse(
+        event_gen(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@app.post("/api/jobs/{job_id}/retry", response_model=JobCreateResponse)
+async def api_retry_job(job_id: str) -> JobCreateResponse:
+    job = await jobstore.retry_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return JobCreateResponse(
+        job_id=job["id"],
+        status=job["status"],
+        session_id=job.get("session_id"),
+        bot_id=job.get("bot_id") or job.get("session_id"),
+    )
+
+
+@app.get("/api/sessions/{session_id}")
+async def api_get_session(session_id: str) -> dict[str, Any]:
+    data = jobstore.load_session(session_id)
+    if not data:
+        return {"session_id": session_id, "messages": [], "jobs": [], "active_jobs": []}
+    # Attach recent/active jobs for reconnect
+    active = jobstore.list_jobs(session_id=session_id, limit=20)
+    running = [j for j in active if j.get("status") in ("queued", "running")]
+    return {
+        "session_id": session_id,
+        "messages": data.get("messages") or [],
+        "jobs": data.get("jobs") or [],
+        "updated_at": data.get("updated_at"),
+        "active_jobs": running,
+        "recent_jobs": active[:10],
+    }
 
 
 # ---------------------------------------------------------------------------

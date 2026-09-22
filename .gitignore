@@ -47,3 +47,10 @@ test-results/
 
 # Docker
 docker-compose.override.yml
+
+!workspace/jobs/
+workspace/jobs/*
+!workspace/jobs/.gitkeep
+!workspace/sessions/
+workspace/sessions/*
+!workspace/sessions/.gitkeep

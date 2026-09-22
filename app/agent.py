@@ -24,12 +24,15 @@ SYSTEM_PROMPT = """You are Nitc Agent — a capable, human-like colleague who ha
 ## Personality & communication
 - Act like a sharp, reliable teammate: warm, direct, and practical — not robotic or overly formal.
 - Prefer clarifying questions when requirements are ambiguous (especially video editing, Flow/generative video, websites, design briefs, or multi-step projects). Ask what success looks like before diving deep.
+- For image analysis requests: lead with a thorough visual description, then insights or actions — do not stall or claim blindness.
 - Write for readability: short paragraphs, bullets for lists, **bold** for key labels or paths, headings when structuring longer answers. Avoid walls of text. Stay conversational — not a lecture.
 - Be honest about limits (sandbox, missing logins, tool failures). Never invent tool results.
 
-## Attachments
+## Attachments & vision (critical)
 - Users may attach images, documents, code, or audio. Attachment paths are under the workspace (`uploads/...`).
-- Image previews may arrive as multimodal `image_url` parts — describe and act on them.
+- When the user asks what is in an image / what you "see", you MUST actually inspect it: use the multimodal image preview if present, or tools (`read_file` is not for pixels — for images rely on vision input; if vision is unavailable, say you received the file at `uploads/...` and use any available describe/screenshot path). Never reply with a lazy "I can't see" when an attachment was provided.
+- Be concrete and professional: describe visible subjects, text, layout, colors, and notable details; then answer the user's ask or propose next actions.
+- Image previews may arrive as multimodal `image_url` parts — treat them as ground truth for what the user sent.
 - Text/code excerpts may be inlined; larger or binary files: use `read_file` / `shell` on the given path.
 - Audio may include a transcript; if not, acknowledge the file at the given path.
 
@@ -348,11 +351,32 @@ async def chat(
                 lower_err = err_text.lower()
                 vision_hint = any(
                     k in lower_err
-                    for k in ("image", "vision", "multimodal", "content", "invalid", "unsupported")
+                    for k in (
+                        "image", "vision", "multimodal", "content", "invalid",
+                        "unsupported", "media", "base64", "dataurl", "data_url",
+                    )
                 )
-                if has_multi and vision_hint:
-                    logger.info("multimodal rejected by API; retrying text-only")
+                # Prefer text-only retry whenever multimodal was sent and the API rejected —
+                # attachment paths remain in the text so the model can still use tools.
+                if has_multi and (vision_hint or resp.status_code in (400, 422)):
+                    logger.info(
+                        "multimodal rejected by API (%s); retrying text-only with file paths",
+                        resp.status_code,
+                    )
                     working[:] = _flatten_messages_for_text_only(working)
+                    # Nudge the model to inspect attachments via tools rather than claiming blindness
+                    working.append(
+                        {
+                            "role": "system",
+                            "content": (
+                                "Vision input was unavailable for this turn. "
+                                "Attachment workspace paths are listed in the user message. "
+                                "Use tools (read_file/shell/desktop_screenshot as appropriate) "
+                                "to inspect what you can; describe files honestly. "
+                                "Do not claim you never received an attachment."
+                            ),
+                        }
+                    )
                     payload = {
                         "model": settings.model,
                         "messages": working,
