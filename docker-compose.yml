@@ -46,12 +46,13 @@ services:
       - nitc
     restart: unless-stopped
     shm_size: "256mb"
+    # XFCE image is heavier; 4GB VPS: keep shm modest, avoid mem_limit wars with agent
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:7090/health"]
       interval: 15s
       timeout: 5s
       retries: 5
-      start_period: 30s
+      start_period: 45s
 
 networks:
   nitc:

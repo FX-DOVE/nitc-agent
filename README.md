@@ -8,21 +8,21 @@ Self-hosted AI agent with a web chat UI, tool-calling loop, sandboxed shell/file
 
 | Capability | Tools / UI |
 |---|---|
-| Chat UI | SPA at `/` with **Chat** and **Computer** tabs |
-| Agent brain | OpenAI-compatible tool-calling loop |
+| Chat UI | Dark SPA at `/` — sidebar (New chat / Computer), message bubbles, fixed composer |
+| Agent brain | OpenAI-compatible tool-calling loop (OpenRouter defaults) |
 | Computer (CLI) | `shell`, `read_file`, `write_file`, `list_dir` (workspace-scoped) |
 | **Interactive desktop** | `desktop_screenshot`, `desktop_click`, `desktop_type`, `desktop_hotkey`, `desktop_scroll`, `desktop_open_browser` |
 | Browser (headless) | `browser_navigate`, `browser_get_text`, `browser_screenshot` (Playwright) |
 | GitHub | `github_run` — wraps `gh` with `GITHUB_TOKEN` |
-| Watch / take over | noVNC on port **6080** (iframe in Computer tab) |
+| Watch / take over | noVNC on port **6080** (Computer view) |
 
 ## Architecture (Phase 2)
 
 ```
 ┌────────────────────┐     Docker network `nitc`     ┌──────────────────────────┐
 │  agent (:8080)     │  HTTP computer tools           │  desktop                 │
-│  FastAPI chat UI   │ ────────────────────────────► │  Xvfb + openbox          │
-│  + tool loop       │    http://desktop:7090         │  Chromium, xdotool       │
+│  FastAPI chat UI   │ ────────────────────────────► │  Xvfb + XFCE (lean)      │
+│  + tool loop       │    http://desktop:7090         │  Chromium, Thunar, term  │
 │                    │                                │  desktop-api (:7090)     │
 │                    │   shared volume ./workspace    │  x11vnc + noVNC (:6080)  │
 └────────────────────┘ ◄────────────────────────────► └──────────────────────────┘
@@ -51,15 +51,19 @@ cp .env.example .env
 # Edit .env — set OPENAI_API_KEY (and optionally GITHUB_TOKEN, VNC_PASSWORD)
 ```
 
+Defaults target **OpenRouter** with a free chat model:
+
 ```bash
-# OpenRouter example
+# OpenRouter (get a real key at https://openrouter.ai/keys — never invent keys)
 OPENAI_API_KEY=sk-or-v1-...
 OPENAI_BASE_URL=https://openrouter.ai/api/v1
-MODEL=openai/gpt-4o-mini
+MODEL=meta-llama/llama-3.3-70b-instruct:free
 
 VNC_PASSWORD=choose-a-secret
 NOVNC_PUBLIC_URL=http://localhost:6080
 ```
+
+Free OpenRouter models and rate limits change over time. If the default is unavailable, pick another `:free` model from [openrouter.ai/models](https://openrouter.ai/models?q=free) and set `MODEL` accordingly.
 
 On a VPS, set `NOVNC_PUBLIC_URL` to `http://YOUR_IP:6080` (or your HTTPS reverse-proxy URL).
 
@@ -78,15 +82,21 @@ Health: `GET /health` · UI config: `GET /api/config`
 
 ### 4. Watch / take over the desktop
 
-1. Open the chat UI → **Computer** tab (iframe), or open noVNC fullscreen.
+1. Open the chat UI → **Computer** in the sidebar (or open noVNC fullscreen).
 2. When prompted, enter `VNC_PASSWORD`.
 3. Ask the agent to open a site or click around — you see it live and can click/type yourself in the same session (`x11vnc -shared`).
+
+The desktop image runs a **lean XFCE** session (panel, wallpaper, desktop icons for Browser / Terminal / Files), Chromium, `xfce4-terminal`, and Thunar — not a blank X root with a stray window.
 
 ### 5. Stop
 
 ```bash
 docker compose down
 ```
+
+## Desktop image size / VPS memory
+
+The XFCE desktop image is heavier than a bare openbox setup (often ~1–1.5 GB on disk after build). On a **4 GB VPS** leave headroom for the agent container: Compose uses `shm_size: 256mb` per service. If the host OOMs, lower resolution (`SCREEN_WIDTH` / `SCREEN_HEIGHT`) or add swap; do not raise Chromium flags that increase GPU/RAM use.
 
 ## Security (important)
 
@@ -98,13 +108,13 @@ docker compose down
 - Never commit `.env` or tokens (see `.gitignore`).
 - File tools stay confined to `WORKSPACE_DIR`; shell boundary is the container.
 
-Same-origin note: the Computer tab iframes `NOVNC_PUBLIC_URL`. If the chat UI and noVNC are on different hosts/ports, some browsers may restrict cookies/embedding — use **Open fullscreen** or put both behind one reverse proxy (e.g. nginx `/` → agent, `/desktop/` → noVNC). A full WebSocket-aware proxy is optional; documenting `:6080` is enough for most VPS setups.
+Same-origin note: the Computer view iframes `NOVNC_PUBLIC_URL`. If the chat UI and noVNC are on different hosts/ports, some browsers may restrict cookies/embedding — use **Open fullscreen** or put both behind one reverse proxy (e.g. nginx `/` → agent, `/desktop/` → noVNC). A full WebSocket-aware proxy is optional; documenting `:6080` is enough for most VPS setups.
 
 ## When to use which browser
 
 | Goal | Use |
 |---|---|
-| User should **see** the GUI / take over | `desktop_*` tools + Computer tab |
+| User should **see** the GUI / take over | `desktop_*` tools + Computer view |
 | Quick scrape / extract text | Playwright `browser_*` tools |
 
 ## API
@@ -128,13 +138,13 @@ nitc-agent/
     agent.py             # tool-calling loop + system prompt
     config.py
     tools/               # shell, files, browser, github, computer
-    static/index.html    # Chat + Computer (noVNC) tabs
+    static/index.html    # Chat + Computer (noVNC) UI
   desktop/
-    entrypoint.sh        # Xvfb, openbox, x11vnc, websockify, desktop-api
+    entrypoint.sh        # Xvfb, XFCE, x11vnc, websockify, desktop-api
     api/main.py          # desktop-api (screenshot/click/type/…)
   workspace/             # shared sandbox volume
   Dockerfile             # agent image
-  Dockerfile.desktop     # desktop + noVNC + desktop-api
+  Dockerfile.desktop     # XFCE desktop + noVNC + desktop-api
   docker-compose.yml
   .env.example
 ```
@@ -142,7 +152,7 @@ nitc-agent/
 ## Roadmap
 
 - **Phase 1**: chat UI, agent loop, shell/files/browser/GitHub, Docker
-- **Phase 2** (this): interactive desktop, noVNC, computer-use tools, Computer tab
+- **Phase 2** (this): interactive desktop, noVNC, computer-use tools, Computer view
 - **Phase 3**: streaming SSE, multi-user sessions, more connectors, persistent memory
 
 ## License

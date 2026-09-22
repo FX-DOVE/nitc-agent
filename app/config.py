@@ -14,8 +14,8 @@ class Settings(BaseSettings):
     )
 
     openai_api_key: str = ""
-    openai_base_url: str = "https://api.openai.com/v1"
-    model: str = "gpt-4o-mini"
+    openai_base_url: str = "https://openrouter.ai/api/v1"
+    model: str = "meta-llama/llama-3.3-70b-instruct:free"
 
     github_token: str = ""
 

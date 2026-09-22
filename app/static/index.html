@@ -6,180 +6,446 @@
   <title>Nitc Agent</title>
   <style>
     :root {
-      --bg: #0f1419;
-      --panel: #1a2332;
-      --border: #2d3a4f;
-      --text: #e7ecf3;
-      --muted: #8b9bb4;
-      --accent: #3d8bfd;
-      --accent-hover: #5ba0ff;
-      --user: #243044;
-      --assistant: #1e2a3a;
-      --danger: #f07178;
-      --ok: #7fd962;
-      --radius: 12px;
-      --font: "Segoe UI", system-ui, -apple-system, sans-serif;
+      --bg: #0b0e14;
+      --bg-elevated: #12161f;
+      --sidebar: #0e1219;
+      --panel: #161b26;
+      --border: #232a38;
+      --border-soft: #1a2130;
+      --text: #e8edf5;
+      --text-secondary: #a8b3c7;
+      --muted: #6b778c;
+      --accent: #4f8cff;
+      --accent-soft: rgba(79, 140, 255, 0.14);
+      --accent-hover: #6ba0ff;
+      --user-bg: #1c2740;
+      --assistant-bg: #141a24;
+      --danger: #ff6b7a;
+      --ok: #5ddea3;
+      --radius: 14px;
+      --radius-sm: 10px;
+      --shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
+      --font: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
+      --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+      --sidebar-w: 260px;
     }
     * { box-sizing: border-box; }
     html, body {
       margin: 0; height: 100%;
       background: var(--bg); color: var(--text);
       font-family: var(--font);
+      font-size: 15px;
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
     }
-    .shell {
-      display: flex; flex-direction: column;
-      height: 100%; max-width: 1200px; margin: 0 auto;
-      padding: 0 12px 12px;
+    button, textarea { font: inherit; color: inherit; }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { color: var(--accent-hover); }
+
+    .app {
+      display: grid;
+      grid-template-columns: var(--sidebar-w) 1fr;
+      height: 100%;
+      overflow: hidden;
     }
-    header {
-      display: flex; align-items: center; justify-content: space-between;
-      padding: 16px 4px 8px; gap: 12px; flex-wrap: wrap;
+
+    /* ——— Sidebar ——— */
+    .sidebar {
+      background: var(--sidebar);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      padding: 16px 12px;
+      gap: 8px;
+      min-height: 0;
     }
-    header h1 {
-      margin: 0; font-size: 1.15rem; font-weight: 650;
+    .brand {
+      display: flex; align-items: center; gap: 12px;
+      padding: 8px 10px 16px;
+    }
+    .brand-mark {
+      width: 36px; height: 36px; border-radius: 10px;
+      background: linear-gradient(145deg, #4f8cff 0%, #7b5cff 100%);
+      display: grid; place-items: center;
+      font-weight: 700; font-size: 0.95rem; color: #fff;
+      box-shadow: 0 4px 16px rgba(79, 140, 255, 0.35);
+      flex-shrink: 0;
+    }
+    .brand-text h1 {
+      margin: 0; font-size: 0.95rem; font-weight: 650;
       letter-spacing: -0.02em;
     }
-    header .meta { color: var(--muted); font-size: 0.8rem; }
+    .brand-text p {
+      margin: 2px 0 0; font-size: 0.72rem; color: var(--muted);
+    }
+    .nav-btn {
+      display: flex; align-items: center; gap: 10px;
+      width: 100%;
+      padding: 10px 12px;
+      border-radius: var(--radius-sm);
+      border: 1px solid transparent;
+      background: transparent;
+      color: var(--text-secondary);
+      cursor: pointer;
+      text-align: left;
+      transition: background .15s, color .15s, border-color .15s;
+    }
+    .nav-btn:hover {
+      background: var(--panel);
+      color: var(--text);
+    }
+    .nav-btn.active {
+      background: var(--accent-soft);
+      color: var(--text);
+      border-color: rgba(79, 140, 255, 0.25);
+    }
+    .nav-btn .ico {
+      width: 18px; height: 18px; opacity: 0.85; flex-shrink: 0;
+    }
+    .nav-btn.primary {
+      background: var(--panel);
+      border-color: var(--border);
+      color: var(--text);
+      margin-bottom: 4px;
+    }
+    .nav-btn.primary:hover {
+      border-color: var(--accent);
+      background: var(--accent-soft);
+    }
+    .sidebar-spacer { flex: 1; }
+    .sidebar-foot {
+      padding: 10px 12px;
+      border-top: 1px solid var(--border);
+      font-size: 0.75rem;
+      color: var(--muted);
+      display: flex; align-items: center; gap: 8px;
+    }
     #status-dot {
-      display: inline-block; width: 8px; height: 8px; border-radius: 50%;
-      background: var(--muted); margin-right: 6px; vertical-align: middle;
+      width: 8px; height: 8px; border-radius: 50%;
+      background: var(--muted); flex-shrink: 0;
     }
-    #status-dot.ok { background: var(--ok); }
+    #status-dot.ok { background: var(--ok); box-shadow: 0 0 8px rgba(93, 222, 163, 0.5); }
     #status-dot.err { background: var(--danger); }
-    .tabs {
-      display: flex; gap: 4px; border-bottom: 1px solid var(--border);
-      padding-bottom: 0;
+
+    /* ——— Main ——— */
+    .main {
+      display: flex; flex-direction: column;
+      min-width: 0; min-height: 0;
+      background:
+        radial-gradient(ellipse 80% 50% at 50% -20%, rgba(79, 140, 255, 0.08), transparent 60%),
+        var(--bg);
     }
-    .tab {
-      background: transparent; border: 1px solid transparent;
-      border-bottom: none; color: var(--muted);
-      padding: 10px 16px; border-radius: 8px 8px 0 0;
-      cursor: pointer; font: inherit; font-weight: 600;
+    .view { display: none; flex: 1; min-height: 0; flex-direction: column; }
+    .view.active { display: flex; }
+
+    .chat-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 14px 24px;
+      border-bottom: 1px solid var(--border-soft);
+      background: rgba(11, 14, 20, 0.7);
+      backdrop-filter: blur(8px);
     }
-    .tab:hover { color: var(--text); }
-    .tab.active {
-      color: var(--text); background: var(--panel);
-      border-color: var(--border); margin-bottom: -1px;
+    .chat-header h2 {
+      margin: 0; font-size: 0.95rem; font-weight: 600;
     }
-    .panels { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-    .panel { display: none; flex: 1; min-height: 0; flex-direction: column; }
-    .panel.active { display: flex; }
+    .chat-header .sub { color: var(--muted); font-size: 0.78rem; margin-top: 2px; }
+
     #messages {
-      flex: 1; overflow-y: auto; padding: 16px 4px;
-      display: flex; flex-direction: column; gap: 12px;
+      flex: 1; overflow-y: auto;
+      padding: 28px 24px 12px;
+      display: flex; flex-direction: column; gap: 18px;
+      scroll-behavior: smooth;
     }
-    .msg {
-      max-width: 92%; padding: 12px 14px; border-radius: var(--radius);
-      line-height: 1.5; white-space: pre-wrap; word-break: break-word;
+    .msg-row {
+      display: flex; gap: 12px; max-width: 820px; width: 100%;
+      margin: 0 auto;
+      animation: fadeIn .2s ease;
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(6px); }
+      to { opacity: 1; transform: none; }
+    }
+    .msg-row.user { flex-direction: row-reverse; }
+    .avatar {
+      width: 32px; height: 32px; border-radius: 10px;
+      flex-shrink: 0; display: grid; place-items: center;
+      font-size: 0.7rem; font-weight: 700;
+    }
+    .msg-row.user .avatar {
+      background: var(--user-bg);
+      border: 1px solid #2a3a58;
+      color: var(--accent);
+    }
+    .msg-row.assistant .avatar {
+      background: linear-gradient(145deg, #4f8cff, #7b5cff);
+      color: #fff;
+    }
+    .bubble {
+      padding: 12px 16px;
+      border-radius: var(--radius);
+      line-height: 1.55;
+      white-space: pre-wrap; word-break: break-word;
+      max-width: min(100%, 680px);
       border: 1px solid var(--border);
     }
-    .msg.user {
-      align-self: flex-end; background: var(--user);
-      border-color: #334663;
+    .msg-row.user .bubble {
+      background: var(--user-bg);
+      border-color: #2a3a58;
+      border-bottom-right-radius: 4px;
     }
-    .msg.assistant {
-      align-self: flex-start; background: var(--assistant);
+    .msg-row.assistant .bubble {
+      background: var(--assistant-bg);
+      border-bottom-left-radius: 4px;
     }
-    .msg .role {
-      font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.06em;
-      color: var(--muted); margin-bottom: 6px;
+    .msg-row.system {
+      justify-content: center; max-width: 640px;
     }
-    .msg.system-note {
-      align-self: center; background: transparent; border-style: dashed;
-      color: var(--muted); font-size: 0.85rem; max-width: 100%;
+    .msg-row.system .bubble {
+      background: transparent; border-style: dashed;
+      color: var(--muted); font-size: 0.88rem;
+      text-align: center; max-width: 100%;
+    }
+    .tools-badge {
+      font-size: 0.72rem; color: var(--muted);
+      margin-top: 8px; font-family: var(--mono);
+    }
+    .typing-dots span {
+      display: inline-block; width: 6px; height: 6px;
+      border-radius: 50%; background: var(--muted);
+      margin: 0 2px; animation: bounce 1.2s infinite;
+    }
+    .typing-dots span:nth-child(2) { animation-delay: .15s; }
+    .typing-dots span:nth-child(3) { animation-delay: .3s; }
+    @keyframes bounce {
+      0%, 60%, 100% { transform: translateY(0); opacity: .4; }
+      30% { transform: translateY(-4px); opacity: 1; }
+    }
+
+    .composer-wrap {
+      padding: 0 24px 20px;
+      max-width: 868px; width: 100%; margin: 0 auto;
     }
     .composer {
-      display: flex; gap: 8px; padding: 10px;
-      background: var(--panel); border: 1px solid var(--border);
-      border-radius: var(--radius);
+      display: flex; gap: 10px; align-items: flex-end;
+      padding: 10px 12px 10px 14px;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      box-shadow: var(--shadow);
+      transition: border-color .15s;
     }
+    .composer:focus-within { border-color: rgba(79, 140, 255, 0.45); }
     #input {
-      flex: 1; resize: none; min-height: 48px; max-height: 160px;
-      background: var(--bg); color: var(--text);
-      border: 1px solid var(--border); border-radius: 8px;
-      padding: 12px; font: inherit; outline: none;
+      flex: 1; resize: none;
+      min-height: 44px; max-height: 180px;
+      background: transparent; color: var(--text);
+      border: none; outline: none;
+      padding: 10px 4px; line-height: 1.45;
     }
-    #input:focus { border-color: var(--accent); }
-    #send, .btn {
-      background: var(--accent); color: #fff; border: none;
-      border-radius: 8px; padding: 0 18px; font-weight: 600;
-      cursor: pointer; font: inherit; text-decoration: none;
-      display: inline-flex; align-items: center; justify-content: center;
-      height: 40px;
+    #input::placeholder { color: var(--muted); }
+    #send {
+      width: 40px; height: 40px; border-radius: 12px;
+      border: none; background: var(--accent); color: #fff;
+      cursor: pointer; display: grid; place-items: center;
+      flex-shrink: 0; transition: background .15s, opacity .15s;
     }
-    #send:hover, .btn:hover { background: var(--accent-hover); }
-    #send:disabled { opacity: 0.5; cursor: not-allowed; }
-    .btn.secondary {
-      background: transparent; border: 1px solid var(--border); color: var(--text);
+    #send:hover { background: var(--accent-hover); }
+    #send:disabled { opacity: 0.4; cursor: not-allowed; }
+    .composer-hint {
+      margin-top: 8px; text-align: center;
+      font-size: 0.72rem; color: var(--muted);
     }
-    .btn.secondary:hover { border-color: var(--accent); color: var(--accent); }
-    .tools-badge {
-      font-size: 0.75rem; color: var(--muted); margin-top: 6px;
+
+    /* ——— Computer view ——— */
+    .computer-view {
+      padding: 16px 20px 20px;
+      gap: 12px;
     }
-    .desktop-toolbar {
-      display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
-      padding: 10px 4px; color: var(--muted); font-size: 0.85rem;
+    .computer-toolbar {
+      display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
     }
-    .desktop-frame-wrap {
-      flex: 1; min-height: 360px; border: 1px solid var(--border);
-      border-radius: var(--radius); overflow: hidden; background: #000;
+    .computer-toolbar h2 {
+      margin: 0; font-size: 0.95rem; font-weight: 600; flex: 1;
+    }
+    .btn {
+      display: inline-flex; align-items: center; gap: 6px;
+      height: 34px; padding: 0 12px;
+      border-radius: 8px; border: 1px solid var(--border);
+      background: var(--panel); color: var(--text);
+      cursor: pointer; font-size: 0.82rem; font-weight: 500;
+      text-decoration: none;
+      transition: border-color .15s, background .15s;
+    }
+    .btn:hover { border-color: var(--accent); color: var(--accent-hover); }
+    .btn.ghost { background: transparent; }
+    .desktop-stage {
+      flex: 1; min-height: 0;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      background: #05070b;
+      overflow: hidden;
       position: relative;
+      box-shadow: var(--shadow);
+    }
+    .desktop-stage::before {
+      content: "";
+      position: absolute; inset: 0;
+      background:
+        radial-gradient(circle at 30% 20%, rgba(79,140,255,.06), transparent 40%),
+        radial-gradient(circle at 70% 80%, rgba(123,92,255,.05), transparent 40%);
+      pointer-events: none; z-index: 0;
     }
     #novnc-frame {
-      width: 100%; height: 100%; border: 0; background: #111;
+      position: relative; z-index: 1;
+      width: 100%; height: 100%; border: 0; background: transparent;
     }
-    .desktop-hint {
-      padding: 8px 4px; color: var(--muted); font-size: 0.8rem; line-height: 1.4;
+    .desktop-empty {
+      position: absolute; inset: 0; z-index: 2;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center; gap: 12px;
+      color: var(--muted); text-align: center; padding: 24px;
+      background: rgba(5, 7, 11, 0.85);
     }
-    .desktop-hint code {
+    .desktop-empty.hidden { display: none; }
+    .desktop-empty h3 { margin: 0; color: var(--text-secondary); font-weight: 600; }
+    .desktop-empty p { margin: 0; max-width: 360px; font-size: 0.88rem; }
+    .desktop-meta {
+      font-size: 0.75rem; color: var(--muted); line-height: 1.45;
+    }
+    .desktop-meta code {
       background: var(--panel); padding: 1px 6px; border-radius: 4px;
-      font-size: 0.75rem;
+      font-family: var(--mono); font-size: 0.72rem;
+    }
+
+    /* Mobile */
+    .menu-toggle {
+      display: none;
+      width: 36px; height: 36px; border-radius: 8px;
+      border: 1px solid var(--border); background: var(--panel);
+      cursor: pointer; align-items: center; justify-content: center;
+    }
+    @media (max-width: 800px) {
+      .app { grid-template-columns: 1fr; }
+      .sidebar {
+        position: fixed; inset: 0 auto 0 0; width: var(--sidebar-w);
+        z-index: 40; transform: translateX(-100%);
+        transition: transform .2s ease;
+      }
+      .sidebar.open { transform: none; }
+      .menu-toggle { display: inline-flex; }
+      .chat-header { padding: 12px 16px; gap: 10px; }
+      #messages { padding: 20px 16px 8px; }
+      .composer-wrap { padding: 0 12px 14px; }
+      .computer-view { padding: 12px; }
+      .backdrop {
+        display: none; position: fixed; inset: 0; background: rgba(0,0,0,.5);
+        z-index: 30;
+      }
+      .backdrop.show { display: block; }
     }
   </style>
 </head>
 <body>
-  <div class="shell">
-    <header>
-      <div>
-        <h1>Nitc Agent</h1>
-        <div class="meta">Phase 2 · desktop · shell · files · browser · GitHub</div>
+  <div class="backdrop" id="backdrop"></div>
+  <div class="app">
+    <aside class="sidebar" id="sidebar">
+      <div class="brand">
+        <div class="brand-mark">N</div>
+        <div class="brand-text">
+          <h1>Nitc Agent</h1>
+          <p>Self-hosted · desktop</p>
+        </div>
       </div>
-      <div class="meta"><span id="status-dot"></span><span id="status-text">checking…</span></div>
-    </header>
 
-    <div class="tabs" role="tablist">
-      <button type="button" class="tab active" data-tab="chat" role="tab" aria-selected="true">Chat</button>
-      <button type="button" class="tab" data-tab="computer" role="tab" aria-selected="false">Computer</button>
-    </div>
+      <button type="button" class="nav-btn primary" id="btn-new-chat" title="New chat">
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M12 5v14M5 12h14"/>
+        </svg>
+        New chat
+      </button>
 
-    <div class="panels">
-      <div class="panel active" id="panel-chat" role="tabpanel">
+      <button type="button" class="nav-btn active" data-view="chat" id="nav-chat">
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"/>
+        </svg>
+        Chat
+      </button>
+      <button type="button" class="nav-btn" data-view="computer" id="nav-computer">
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="3" y="4" width="18" height="12" rx="2"/>
+          <path d="M8 20h8M12 16v4"/>
+        </svg>
+        Computer
+      </button>
+
+      <div class="sidebar-spacer"></div>
+      <div class="sidebar-foot">
+        <span id="status-dot"></span>
+        <span id="status-text">checking…</span>
+      </div>
+    </aside>
+
+    <main class="main">
+      <!-- Chat -->
+      <section class="view active" id="view-chat">
+        <div class="chat-header">
+          <button type="button" class="menu-toggle" id="menu-toggle" aria-label="Menu">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M4 7h16M4 12h16M4 17h16"/>
+            </svg>
+          </button>
+          <div>
+            <h2>Chat</h2>
+            <div class="sub">Ask me to drive the desktop, run commands, edit files, browse, or use GitHub</div>
+          </div>
+        </div>
         <div id="messages">
-          <div class="msg system-note">Ask me to drive the desktop (watch the Computer tab), run commands, edit workspace files, browse, or use GitHub.</div>
+          <div class="msg-row system">
+            <div class="bubble">Welcome. Open <strong>Computer</strong> in the sidebar to watch the live desktop while I work.</div>
+          </div>
         </div>
-        <form class="composer" id="form">
-          <textarea id="input" placeholder="Message Nitc Agent…" rows="2" autofocus></textarea>
-          <button type="submit" id="send">Send</button>
-        </form>
-      </div>
+        <div class="composer-wrap">
+          <form class="composer" id="form">
+            <textarea id="input" placeholder="Message Nitc Agent…" rows="1" autofocus></textarea>
+            <button type="submit" id="send" aria-label="Send">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+                <path d="M5 12h14M13 6l6 6-6 6"/>
+              </svg>
+            </button>
+          </form>
+          <div class="composer-hint">Enter to send · Shift+Enter for newline</div>
+        </div>
+      </section>
 
-      <div class="panel" id="panel-computer" role="tabpanel">
-        <div class="desktop-toolbar">
-          <span>Live desktop (noVNC)</span>
-          <a class="btn secondary" id="novnc-open" href="#" target="_blank" rel="noopener">Open fullscreen</a>
-          <button type="button" class="btn secondary" id="novnc-reload">Reload view</button>
+      <!-- Computer -->
+      <section class="view computer-view" id="view-computer">
+        <div class="computer-toolbar">
+          <button type="button" class="menu-toggle" id="menu-toggle-2" aria-label="Menu">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M4 7h16M4 12h16M4 17h16"/>
+            </svg>
+          </button>
+          <h2>Computer</h2>
+          <a class="btn" id="novnc-open" href="#" target="_blank" rel="noopener">Open fullscreen</a>
+          <button type="button" class="btn ghost" id="novnc-reload">Reload</button>
+          <button type="button" class="btn ghost" id="novnc-connect">Connect</button>
         </div>
-        <div class="desktop-frame-wrap">
+        <div class="desktop-stage">
+          <div class="desktop-empty" id="desktop-empty">
+            <h3>Live Linux desktop</h3>
+            <p>Connect to stream the XFCE session via noVNC. Enter <code>VNC_PASSWORD</code> when prompted.</p>
+            <button type="button" class="btn" id="novnc-connect-2">Connect desktop</button>
+          </div>
           <iframe id="novnc-frame" title="Nitc desktop noVNC" allow="clipboard-read; clipboard-write"></iframe>
         </div>
-        <div class="desktop-hint">
-          Enter the <code>VNC_PASSWORD</code> when prompted. On a VPS set <code>NOVNC_PUBLIC_URL</code>
-          to your public host and firewall port <strong>6080</strong> (or put noVNC behind HTTPS + auth).
-          Same-host embeds work when the chat UI and noVNC share a reachable origin; otherwise use Open fullscreen.
+        <div class="desktop-meta">
+          Firewall port <strong>6080</strong>. Set <code>NOVNC_PUBLIC_URL</code> on a VPS.
+          Prefer HTTPS + auth in production.
         </div>
-      </div>
-    </div>
+      </section>
+    </main>
   </div>
+
   <script>
     const messagesEl = document.getElementById("messages");
     const form = document.getElementById("form");
@@ -190,74 +456,117 @@
     const novncFrame = document.getElementById("novnc-frame");
     const novncOpen = document.getElementById("novnc-open");
     const novncReload = document.getElementById("novnc-reload");
+    const desktopEmpty = document.getElementById("desktop-empty");
+    const sidebar = document.getElementById("sidebar");
+    const backdrop = document.getElementById("backdrop");
 
     /** @type {{role: string, content: string}[]} */
     let history = [];
     let novncEmbed = "";
-    let novncPublic = "";
     let computerLoaded = false;
 
+    function autoResize() {
+      input.style.height = "auto";
+      input.style.height = Math.min(input.scrollHeight, 180) + "px";
+    }
+    input.addEventListener("input", autoResize);
+
     function appendMessage(role, content, extra) {
-      const div = document.createElement("div");
-      div.className = "msg " + role;
-      const roleEl = document.createElement("div");
-      roleEl.className = "role";
-      roleEl.textContent = role;
-      const body = document.createElement("div");
-      body.textContent = content;
-      div.appendChild(roleEl);
-      div.appendChild(body);
+      const row = document.createElement("div");
+      row.className = "msg-row " + role;
+
+      if (role !== "system") {
+        const av = document.createElement("div");
+        av.className = "avatar";
+        av.textContent = role === "user" ? "You" : "N";
+        row.appendChild(av);
+      }
+
+      const bubble = document.createElement("div");
+      bubble.className = "bubble";
+      if (content === "__thinking__") {
+        bubble.innerHTML = '<div class="typing-dots"><span></span><span></span><span></span></div>';
+      } else {
+        bubble.textContent = content;
+      }
       if (extra) {
         const badge = document.createElement("div");
         badge.className = "tools-badge";
         badge.textContent = extra;
-        div.appendChild(badge);
+        bubble.appendChild(badge);
       }
-      messagesEl.appendChild(div);
+      row.appendChild(bubble);
+      messagesEl.appendChild(row);
       messagesEl.scrollTop = messagesEl.scrollHeight;
-      return div;
+      return row;
     }
 
-    function setTab(name) {
-      document.querySelectorAll(".tab").forEach((t) => {
-        const on = t.dataset.tab === name;
-        t.classList.toggle("active", on);
-        t.setAttribute("aria-selected", on ? "true" : "false");
+    function setView(name) {
+      document.querySelectorAll(".nav-btn[data-view]").forEach((b) => {
+        b.classList.toggle("active", b.dataset.view === name);
       });
-      document.querySelectorAll(".panel").forEach((p) => {
-        p.classList.toggle("active", p.id === "panel-" + name);
+      document.querySelectorAll(".view").forEach((v) => {
+        v.classList.toggle("active", v.id === "view-" + name);
       });
+      closeSidebar();
       if (name === "computer" && !computerLoaded && novncEmbed) {
+        connectDesktop();
+      }
+    }
+
+    function connectDesktop() {
+      if (!novncEmbed) return;
+      novncFrame.src = novncEmbed;
+      computerLoaded = true;
+      desktopEmpty.classList.add("hidden");
+    }
+
+    function newChat() {
+      history = [];
+      messagesEl.innerHTML = "";
+      appendMessage("system", "New chat started. Open Computer to watch the live desktop.");
+      setView("chat");
+      input.focus();
+    }
+
+    function openSidebar() {
+      sidebar.classList.add("open");
+      backdrop.classList.add("show");
+    }
+    function closeSidebar() {
+      sidebar.classList.remove("open");
+      backdrop.classList.remove("show");
+    }
+
+    document.querySelectorAll(".nav-btn[data-view]").forEach((b) => {
+      b.addEventListener("click", () => setView(b.dataset.view));
+    });
+    document.getElementById("btn-new-chat").addEventListener("click", newChat);
+    document.getElementById("menu-toggle").addEventListener("click", openSidebar);
+    document.getElementById("menu-toggle-2").addEventListener("click", openSidebar);
+    backdrop.addEventListener("click", closeSidebar);
+    document.getElementById("novnc-connect").addEventListener("click", connectDesktop);
+    document.getElementById("novnc-connect-2").addEventListener("click", connectDesktop);
+    novncReload.addEventListener("click", () => {
+      if (novncEmbed) {
         novncFrame.src = novncEmbed;
         computerLoaded = true;
+        desktopEmpty.classList.add("hidden");
       }
-    }
-
-    document.querySelectorAll(".tab").forEach((t) => {
-      t.addEventListener("click", () => setTab(t.dataset.tab));
     });
 
     async function loadConfig() {
       try {
         const r = await fetch("/api/config");
         const data = await r.json();
-        novncPublic = (data.novnc_public_url || "http://localhost:6080").replace(/\/$/, "");
-        novncEmbed = data.novnc_embed_url
-          || (novncPublic + "/vnc.html?autoconnect=1&resize=scale");
+        const pub = (data.novnc_public_url || "http://localhost:6080").replace(/\/$/, "");
+        novncEmbed = data.novnc_embed_url || (pub + "/vnc.html?autoconnect=1&resize=scale");
         novncOpen.href = novncEmbed;
       } catch (e) {
-        novncPublic = "http://localhost:6080";
-        novncEmbed = novncPublic + "/vnc.html?autoconnect=1&resize=scale";
+        novncEmbed = "http://localhost:6080/vnc.html?autoconnect=1&resize=scale";
         novncOpen.href = novncEmbed;
       }
     }
-
-    novncReload.addEventListener("click", () => {
-      if (novncEmbed) {
-        novncFrame.src = novncEmbed;
-        computerLoaded = true;
-      }
-    });
 
     async function refreshHealth() {
       try {
@@ -265,8 +574,8 @@
         const data = await r.json();
         statusDot.className = data.api_key_set ? "ok" : "err";
         statusText.textContent = data.api_key_set
-          ? `ok · ${data.model}`
-          : "missing OPENAI_API_KEY";
+          ? (data.model || "ready")
+          : "missing API key";
       } catch (e) {
         statusDot.className = "err";
         statusText.textContent = "offline";
@@ -278,10 +587,11 @@
       const text = input.value.trim();
       if (!text) return;
       input.value = "";
+      autoResize();
       appendMessage("user", text);
       history.push({ role: "user", content: text });
       sendBtn.disabled = true;
-      const thinking = appendMessage("assistant", "Thinking…");
+      const thinking = appendMessage("assistant", "__thinking__");
       try {
         const r = await fetch("/api/chat", {
           method: "POST",
@@ -293,9 +603,7 @@
         if (!r.ok) {
           appendMessage("assistant", data.detail || JSON.stringify(data));
         } else {
-          const extra = data.tool_rounds
-            ? `tool rounds: ${data.tool_rounds}`
-            : null;
+          const extra = data.tool_rounds ? `tool rounds: ${data.tool_rounds}` : null;
           appendMessage("assistant", data.reply, extra);
           history.push({ role: "assistant", content: data.reply });
         }

@@ -1,10 +1,14 @@
 #!/usr/bin/env bash
-# Start Xvfb + lightweight DE + x11vnc + noVNC + desktop-api
+# Start Xvfb + lean XFCE desktop + x11vnc + noVNC + desktop-api
 set -euo pipefail
 
 export DISPLAY="${DISPLAY:-:99}"
 export HOME="${HOME:-/home/desktop}"
 export DESKTOP_WORKSPACE="${DESKTOP_WORKSPACE:-/home/desktop/workspace}"
+export XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
+export XDG_DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
+export XDG_CACHE_HOME="${XDG_CACHE_HOME:-$HOME/.cache}"
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/tmp/runtime-desktop}"
 VNC_PASSWORD="${VNC_PASSWORD:-nitc}"
 SCREEN_WIDTH="${SCREEN_WIDTH:-1280}"
 SCREEN_HEIGHT="${SCREEN_HEIGHT:-800}"
@@ -13,14 +17,21 @@ VNC_PORT="${VNC_PORT:-5900}"
 NOVNC_PORT="${NOVNC_PORT:-6080}"
 DESKTOP_API_PORT="${DESKTOP_API_PORT:-7090}"
 
-mkdir -p "$HOME/.vnc" "$DESKTOP_WORKSPACE/screenshots" /tmp/.X11-unix
+mkdir -p \
+  "$HOME/.vnc" \
+  "$HOME/Desktop" \
+  "$DESKTOP_WORKSPACE/screenshots" \
+  "$XDG_RUNTIME_DIR" \
+  /tmp/.X11-unix
+chmod 700 "$XDG_RUNTIME_DIR"
 chmod 1777 /tmp/.X11-unix
 
-# VNC password (classic VNC truncates to 8 chars)
-mkdir -p "$HOME/.vnc"
+for f in "$HOME/Desktop"/*.desktop; do
+  [[ -f "$f" ]] && chmod +x "$f" || true
+done
+
 PASS="${VNC_PASSWORD:0:8}"
 if ! x11vnc -storepasswd "$PASS" "$HOME/.vnc/passwd" >/tmp/vnc_store.log 2>&1; then
-  # Fallback: passwd on cmdline for x11vnc below
   echo "[entrypoint] storepasswd failed; will use -passwd" >&2
   USE_PASSWD_ARG=1
 else
@@ -28,11 +39,15 @@ else
   USE_PASSWD_ARG=0
 fi
 
-echo "[entrypoint] Starting Xvfb on $DISPLAY (${SCREEN_WIDTH}x${SCREEN_HEIGHT}x${SCREEN_DEPTH})"
-Xvfb "$DISPLAY" -screen 0 "${SCREEN_WIDTH}x${SCREEN_HEIGHT}x${SCREEN_DEPTH}" -ac +extension GLX +render -noreset &
-XVFB_PID=$!
+if [[ -z "${DBUS_SESSION_BUS_ADDRESS:-}" ]] && command -v dbus-launch >/dev/null 2>&1; then
+  eval "$(dbus-launch --sh-syntax)"
+  export DBUS_SESSION_BUS_ADDRESS
+fi
 
-# Wait for X
+echo "[entrypoint] Starting Xvfb on $DISPLAY (${SCREEN_WIDTH}x${SCREEN_HEIGHT}x${SCREEN_DEPTH})"
+Xvfb "$DISPLAY" -screen 0 "${SCREEN_WIDTH}x${SCREEN_HEIGHT}x${SCREEN_DEPTH}" \
+  -ac +extension GLX +render -noreset &
+
 for i in $(seq 1 50); do
   if xdpyinfo -display "$DISPLAY" >/dev/null 2>&1; then
     break
@@ -44,24 +59,51 @@ if ! xdpyinfo -display "$DISPLAY" >/dev/null 2>&1; then
   exit 1
 fi
 
-echo "[entrypoint] Starting openbox + pcmanfm"
-openbox &
-# Desktop icons / wallpaper-ish background
-pcmanfm --desktop --profile default >/tmp/pcmanfm.log 2>&1 &
-# Simple panel optional — skip if tint2 missing
-if command -v tint2 >/dev/null 2>&1; then
-  tint2 >/tmp/tint2.log 2>&1 &
+# Wallpaper immediately so VNC is never a blank/code-only root window
+if command -v hsetroot >/dev/null 2>&1; then
+  if [[ -f /opt/nitc-wallpaper/wallpaper.png ]]; then
+    hsetroot -fill /opt/nitc-wallpaper/wallpaper.png || hsetroot -solid "#121c30" || true
+  else
+    hsetroot -solid "#121c30" || true
+  fi
+elif command -v xsetroot >/dev/null 2>&1; then
+  xsetroot -solid "#121c30" || true
 fi
+
+echo "[entrypoint] Starting XFCE components (wm + settings + panel + desktop)"
+# Explicit components — more reliable in containers than a full xfce4-session
+# (avoids session-save dialogs and duplicate panels).
+xfwm4 --replace >/tmp/xfwm4.log 2>&1 &
+xfsettingsd --replace >/tmp/xfsettingsd.log 2>&1 &
+sleep 0.3
+xfce4-panel --disable-wm-check >/tmp/xfce4-panel.log 2>&1 &
+xfdesktop --disable-wm-check >/tmp/xfdesktop.log 2>&1 &
+sleep 1
 
 echo "[entrypoint] Starting x11vnc on :${VNC_PORT}"
 if [[ "${USE_PASSWD_ARG:-0}" == "1" ]]; then
-  x11vnc     -display "$DISPLAY"     -rfbport "$VNC_PORT"     -passwd "$PASS"     -forever     -shared     -noxdamage     -repeat     -o /tmp/x11vnc.log     &
+  x11vnc \
+    -display "$DISPLAY" \
+    -rfbport "$VNC_PORT" \
+    -passwd "$PASS" \
+    -forever \
+    -shared \
+    -noxdamage \
+    -repeat \
+    -o /tmp/x11vnc.log &
 else
-  x11vnc     -display "$DISPLAY"     -rfbport "$VNC_PORT"     -rfbauth "$HOME/.vnc/passwd"     -forever     -shared     -noxdamage     -repeat     -o /tmp/x11vnc.log     &
+  x11vnc \
+    -display "$DISPLAY" \
+    -rfbport "$VNC_PORT" \
+    -rfbauth "$HOME/.vnc/passwd" \
+    -forever \
+    -shared \
+    -noxdamage \
+    -repeat \
+    -o /tmp/x11vnc.log &
 fi
 
 echo "[entrypoint] Starting noVNC/websockify on :${NOVNC_PORT}"
-# websockify ships with novnc package or standalone
 NOVNC_WEB="${NOVNC_WEB:-/usr/share/novnc}"
 if [[ ! -d "$NOVNC_WEB" ]]; then
   NOVNC_WEB="/opt/novnc"
