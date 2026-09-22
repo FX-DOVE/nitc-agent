@@ -366,10 +366,12 @@ async def set_clipboard(body: ClipboardBody) -> dict[str, Any]:
     """Write text to the X11 clipboard (CLIPBOARD + PRIMARY)."""
     payload = body.text if body.text is not None else ""
     # Prefer xsel — it exits after setting. Fall back to xclip (may hang as owner).
+    # Both xsel and xclip may linger as clipboard owners under Xvfb; hang after
+    # stdin close still means the selection was posted.
     if shutil.which("xsel"):
-        await _pipe_clipboard(["xsel", "--clipboard", "--input"], payload, allow_hang=False)
+        await _pipe_clipboard(["xsel", "--clipboard", "--input"], payload, allow_hang=True)
         try:
-            await _pipe_clipboard(["xsel", "--primary", "--input"], payload, allow_hang=False)
+            await _pipe_clipboard(["xsel", "--primary", "--input"], payload, allow_hang=True)
         except HTTPException:
             pass
     elif shutil.which("xclip"):
