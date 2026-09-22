@@ -1,0 +1,9 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Browser
+Comment=Chromium
+Exec=chromium --no-sandbox --disable-gpu --disable-dev-shm-usage
+Icon=chromium
+Terminal=false
+Categories=Network;WebBrowser;

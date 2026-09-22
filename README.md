@@ -86,7 +86,7 @@ Health: `GET /health` · UI config: `GET /api/config`
 2. When prompted, enter `VNC_PASSWORD`.
 3. Ask the agent to open a site or click around — you see it live and can click/type yourself in the same session (`x11vnc -shared`).
 
-The desktop image runs a **lean XFCE** session (panel, wallpaper, desktop icons for Browser / Terminal / Files), Chromium, `xfce4-terminal`, and Thunar — not a blank X root with a stray window.
+The desktop image runs a **polished lean XFCE** session: soft wallpaper, Greybird + Papirus theme, bottom panel with Browser / Terminal / Files launchers, Chromium, `xfce4-terminal`, and Thunar — meant to feel like a real computer view, not a blank X root.
 
 ### 5. Stop
 

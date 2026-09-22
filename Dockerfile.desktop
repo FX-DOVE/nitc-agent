@@ -1,7 +1,6 @@
-# Interactive Linux desktop for Nitc Agent — lean XFCE + Chromium + noVNC
-# Heavier than openbox (~800MB–1.2GB image) but shows a real desktop with
-# panel, wallpaper, and icons. Reasonable on a 4GB VPS with shm_size 256mb;
-# leave headroom for the agent container.
+# Interactive Linux desktop for Nitc Agent — polished lean XFCE + Chromium + noVNC
+# Soft wallpaper, Greybird + Papirus, bottom panel with Browser/Terminal/Files.
+# Image ~1.5–2GB; fine on a 4GB VPS with mem_limit ~1g and shm_size 256mb.
 FROM debian:bookworm-slim
 
 ENV DEBIAN_FRONTEND=noninteractive \
@@ -14,11 +13,10 @@ ENV DEBIAN_FRONTEND=noninteractive \
     XDG_CACHE_HOME=/home/desktop/.cache
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    # Display server
     xvfb \
     x11-utils \
     x11-xserver-utils \
-    # Lean XFCE (avoid full xfce4 meta — pulls extras)
+    # Lean XFCE
     xfce4-session \
     xfce4-panel \
     xfce4-settings \
@@ -27,8 +25,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     xfce4-terminal \
     thunar \
     dbus-x11 \
-    # Panel plugins (lightweight)
     xfce4-whiskermenu-plugin \
+    xfce4-appfinder \
+    # Theme / icons (readable, modern)
+    greybird-gtk-theme \
+    papirus-icon-theme \
     # Input / capture
     xdotool \
     scrot \
@@ -37,7 +38,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     x11vnc \
     novnc \
     websockify \
-    # Browser + file tools
+    # Browser
     chromium \
     # Fonts / basics
     fonts-liberation \
@@ -49,104 +50,56 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-pip \
     python3-venv \
     procps \
-    # Solid wallpaper helper
+    libglib2.0-bin \
     hsetroot \
     && rm -rf /var/lib/apt/lists/* \
     && ln -sf /usr/bin/chromium /usr/local/bin/chromium-browser || true \
     && update-alternatives --set x-terminal-emulator /usr/bin/xfce4-terminal.wrapper 2>/dev/null || true
 
-# Desktop user
 RUN useradd -m -u 1000 -s /bin/bash desktop \
     && mkdir -p \
       /home/desktop/workspace/screenshots \
       /home/desktop/.vnc \
       /home/desktop/Desktop \
       /home/desktop/.config/autostart \
+      /home/desktop/.config/xfce4/panel \
       /home/desktop/.config/xfce4/xfconf/xfce-perchannel-xml \
       /home/desktop/.local/share/applications \
       /opt/desktop-api \
       /opt/nitc-wallpaper \
     && chown -R desktop:desktop /home/desktop
 
-# Solid dark wallpaper PNG (ImageMagick; no external assets)
-RUN convert -size 1920x1080 "gradient:#0e1624-#1a2a44" /opt/nitc-wallpaper/wallpaper.png \
-    || convert -size 1920x1080 xc:#121c30 /opt/nitc-wallpaper/wallpaper.png \
-    || true
+# Soft modern wallpaper (baked asset — not solid black)
+COPY desktop/assets/wallpaper.png /opt/nitc-wallpaper/wallpaper.png
 
+# Desktop icons
+COPY desktop/xfce-config/launchers/browser.desktop /home/desktop/Desktop/Browser.desktop
+COPY desktop/xfce-config/launchers/terminal.desktop /home/desktop/Desktop/Terminal.desktop
+COPY desktop/xfce-config/launchers/files.desktop /home/desktop/Desktop/Files.desktop
+RUN chmod +x /home/desktop/Desktop/*.desktop \
+    && chown -R desktop:desktop /home/desktop/Desktop
 
-# Desktop launchers (icons on Desktop)
-RUN printf '%s\n' \
-  '[Desktop Entry]' \
-  'Version=1.0' \
-  'Type=Application' \
-  'Name=Browser' \
-  'Comment=Chromium web browser' \
-  'Exec=chromium --no-sandbox --disable-gpu --disable-dev-shm-usage' \
-  'Icon=chromium' \
-  'Terminal=false' \
-  'Categories=Network;WebBrowser;' \
-  > /home/desktop/Desktop/Browser.desktop \
-  && printf '%s\n' \
-  '[Desktop Entry]' \
-  'Version=1.0' \
-  'Type=Application' \
-  'Name=Terminal' \
-  'Comment=XFCE Terminal' \
-  'Exec=xfce4-terminal' \
-  'Icon=utilities-terminal' \
-  'Terminal=false' \
-  'Categories=System;TerminalEmulator;' \
-  > /home/desktop/Desktop/Terminal.desktop \
-  && printf '%s\n' \
-  '[Desktop Entry]' \
-  'Version=1.0' \
-  'Type=Application' \
-  'Name=Files' \
-  'Comment=Thunar file manager' \
-  'Exec=thunar /home/desktop/workspace' \
-  'Icon=system-file-manager' \
-  'Terminal=false' \
-  'Categories=System;FileManager;' \
-  > /home/desktop/Desktop/Files.desktop \
-  && chmod +x /home/desktop/Desktop/*.desktop \
-  && chown -R desktop:desktop /home/desktop/Desktop
+# Also install into applications menu
+RUN cp /home/desktop/Desktop/Browser.desktop /home/desktop/.local/share/applications/nitc-browser.desktop \
+    && cp /home/desktop/Desktop/Terminal.desktop /home/desktop/.local/share/applications/nitc-terminal.desktop \
+    && cp /home/desktop/Desktop/Files.desktop /home/desktop/.local/share/applications/nitc-files.desktop \
+    && chown -R desktop:desktop /home/desktop/.local
 
-# xfdesktop: show icons + wallpaper
-RUN printf '%s\n' \
-  '<?xml version="1.0" encoding="UTF-8"?>' \
-  '<channel name="xfce4-desktop" version="1.0">' \
-  '  <property name="backdrop" type="empty">' \
-  '    <property name="screen0" type="empty">' \
-  '      <property name="monitor0" type="empty">' \
-  '        <property name="workspace0" type="empty">' \
-  '          <property name="color-style" type="int" value="0"/>' \
-  '          <property name="image-style" type="int" value="5"/>' \
-  '          <property name="last-image" type="string" value="/opt/nitc-wallpaper/wallpaper.png"/>' \
-  '        </property>' \
-  '      </property>' \
-  '      <property name="monitorVNC-0" type="empty">' \
-  '        <property name="workspace0" type="empty">' \
-  '          <property name="color-style" type="int" value="0"/>' \
-  '          <property name="image-style" type="int" value="5"/>' \
-  '          <property name="last-image" type="string" value="/opt/nitc-wallpaper/wallpaper.png"/>' \
-  '        </property>' \
-  '      </property>' \
-  '    </property>' \
-  '  </property>' \
-  '  <property name="desktop-icons" type="empty">' \
-  '    <property name="style" type="int" value="2"/>' \
-  '    <property name="file-icons" type="empty">' \
-  '      <property name="show-home" type="bool" value="false"/>' \
-  '      <property name="show-filesystem" type="bool" value="false"/>' \
-  '      <property name="show-trash" type="bool" value="false"/>' \
-  '      <property name="show-removable" type="bool" value="false"/>' \
-  '    </property>' \
-  '  </property>' \
-  '</channel>' \
-  > /home/desktop/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-desktop.xml \
-  && chown -R desktop:desktop /home/desktop/.config
+# XFCE channel configs (theme, panel, wallpaper, wm)
+COPY desktop/xfce-config/xfce4-desktop.xml /home/desktop/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-desktop.xml
+COPY desktop/xfce-config/xfce4-panel.xml /home/desktop/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-panel.xml
+COPY desktop/xfce-config/xsettings.xml /home/desktop/.config/xfce4/xfconf/xfce-perchannel-xml/xsettings.xml
+COPY desktop/xfce-config/xfwm4.xml /home/desktop/.config/xfce4/xfconf/xfce-perchannel-xml/xfwm4.xml
 
-# Disable first-run / session save prompts where possible
+# Panel launcher plugin item dirs (plugin-3/4/5)
+RUN mkdir -p \
+      /home/desktop/.config/xfce4/panel/launcher-3 \
+      /home/desktop/.config/xfce4/panel/launcher-4 \
+      /home/desktop/.config/xfce4/panel/launcher-5 \
+    && cp /home/desktop/Desktop/Browser.desktop /home/desktop/.config/xfce4/panel/launcher-3/browser.desktop \
+    && cp /home/desktop/Desktop/Terminal.desktop /home/desktop/.config/xfce4/panel/launcher-4/terminal.desktop \
+    && cp /home/desktop/Desktop/Files.desktop /home/desktop/.config/xfce4/panel/launcher-5/files.desktop
+
 RUN printf '%s\n' \
   '<?xml version="1.0" encoding="UTF-8"?>' \
   '<channel name="xfce4-session" version="1.0">' \
@@ -156,7 +109,7 @@ RUN printf '%s\n' \
   '  </property>' \
   '</channel>' \
   > /home/desktop/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-session.xml \
-  && chown desktop:desktop /home/desktop/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-session.xml
+  && chown -R desktop:desktop /home/desktop/.config
 
 # Desktop control API
 COPY desktop/api/requirements.txt /opt/desktop-api/requirements.txt
@@ -171,7 +124,7 @@ WORKDIR /home/desktop
 
 EXPOSE 6080 7090
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=35s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
   CMD curl -fsS http://127.0.0.1:7090/health || exit 1
 
 CMD ["/usr/local/bin/desktop-entrypoint.sh"]
