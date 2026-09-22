@@ -93,6 +93,11 @@ class ChatRequest(BaseModel):
         default=None,
         description="Alias for session_id (multi-bot UI)",
     )
+    instructions: str | None = Field(
+        default=None,
+        max_length=4000,
+        description="Optional per-bot system prompt stub from the client",
+    )
 
 
 class JobCreateResponse(BaseModel):
@@ -326,6 +331,37 @@ class AllowOnceBody(BaseModel):
     args: dict[str, Any] = Field(default_factory=dict)
 
 
+
+
+@app.get("/api/media/files/{name}")
+async def media_file(name: str) -> FileResponse:
+    """Serve a downloadable artifact from workspace/downloads/ (path-safe)."""
+    if not name or name != Path(name).name or ".." in name or "/" in name or "\\" in name:
+        raise HTTPException(status_code=400, detail="Invalid file name")
+    if not re.fullmatch(r"[A-Za-z0-9._-]+", name):
+        raise HTTPException(status_code=400, detail="Invalid file name")
+
+    settings = get_settings()
+    root = (settings.workspace_path / "downloads").resolve()
+    root.mkdir(parents=True, exist_ok=True)
+    path = (root / name).resolve()
+    if not str(path).startswith(str(root) + "/") and path != root:
+        raise HTTPException(status_code=403, detail="Path escape blocked")
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="File not found")
+
+    import mimetypes
+
+    media, _ = mimetypes.guess_type(name)
+    return FileResponse(
+        path,
+        media_type=media or "application/octet-stream",
+        filename=name,
+        headers={"Content-Disposition": f'attachment; filename="{name}"'},
+    )
+
+
+
 @app.get("/api/settings")
 async def api_get_settings() -> dict[str, Any]:
     from app import runtime_settings as rs
@@ -347,6 +383,112 @@ async def api_allow_once(body: AllowOnceBody) -> dict[str, Any]:
     from app import runtime_settings as rs
     token = rs.grant_allow_once(body.tool, body.args or {})
     return {"ok": True, "token": token, "tool": body.tool}
+
+
+
+class ApprovalDecisionBody(BaseModel):
+    decision: str | None = Field(default=None, max_length=32)
+
+
+@app.get("/api/approvals/{approval_id}")
+async def api_get_approval(approval_id: str) -> dict[str, Any]:
+    from app import approvals as approval_store
+    rec = approval_store.get_approval(approval_id)
+    if not rec:
+        raise HTTPException(status_code=404, detail="Approval not found")
+    return approval_store.public_approval(rec)
+
+
+@app.post("/api/approvals/{approval_id}/approve")
+async def api_approve(approval_id: str) -> dict[str, Any]:
+    """Approve a paused Auto-review tool; resumes the SAME job from the waiting tool."""
+    from app import approvals as approval_store
+    try:
+        rec = approval_store.resolve_approval(approval_id, "approve")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not rec:
+        raise HTTPException(status_code=404, detail="Approval not found")
+    # Reflect on job events
+    job_id = rec.get("job_id")
+    if job_id:
+        job = jobstore.load_job(str(job_id))
+        if job:
+            jobstore.append_event(
+                job,
+                "approval",
+                approval_id=approval_id,
+                tool=rec.get("tool"),
+                status="approved",
+                message="User approved — resuming tool",
+                args_summary=rec.get("args_summary"),
+                risk=rec.get("risk"),
+                args=rec.get("args") or {},
+            )
+            if job.get("status") == "awaiting_approval":
+                job["status"] = "running"
+            jobstore.save_job(job)
+    return {"ok": True, **approval_store.public_approval(rec)}
+
+
+@app.post("/api/approvals/{approval_id}/decline")
+async def api_decline(approval_id: str) -> dict[str, Any]:
+    """Decline a paused tool; the agent continues with a declined tool result."""
+    from app import approvals as approval_store
+    try:
+        rec = approval_store.resolve_approval(approval_id, "decline")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not rec:
+        raise HTTPException(status_code=404, detail="Approval not found")
+    job_id = rec.get("job_id")
+    if job_id:
+        job = jobstore.load_job(str(job_id))
+        if job:
+            jobstore.append_event(
+                job,
+                "approval",
+                approval_id=approval_id,
+                tool=rec.get("tool"),
+                status="declined",
+                message="User declined tool",
+                args_summary=rec.get("args_summary"),
+                risk=rec.get("risk"),
+            )
+            if job.get("status") == "awaiting_approval":
+                job["status"] = "running"
+            jobstore.save_job(job)
+    return {"ok": True, **approval_store.public_approval(rec)}
+
+
+@app.post("/api/approvals/{approval_id}/allow-once")
+async def api_allow_once_approval(approval_id: str) -> dict[str, Any]:
+    from app import approvals as approval_store
+    try:
+        rec = approval_store.resolve_approval(approval_id, "allow_once")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not rec:
+        raise HTTPException(status_code=404, detail="Approval not found")
+    job_id = rec.get("job_id")
+    if job_id:
+        job = jobstore.load_job(str(job_id))
+        if job:
+            jobstore.append_event(
+                job,
+                "approval",
+                approval_id=approval_id,
+                tool=rec.get("tool"),
+                status="approved",
+                message="User allowed once — resuming tool",
+                args_summary=rec.get("args_summary"),
+                risk=rec.get("risk"),
+                args=rec.get("args") or {},
+            )
+            if job.get("status") == "awaiting_approval":
+                job["status"] = "running"
+            jobstore.save_job(job)
+    return {"ok": True, **approval_store.public_approval(rec)}
 
 
 @app.post("/api/auth/login")
@@ -554,6 +696,7 @@ async def api_create_job(body: ChatRequest) -> JobCreateResponse:
         attachments=att_dicts or None,
         session_id=sid,
         bot_id=sid,
+        instructions=body.instructions,
     )
     jobstore.enqueue_job(job["id"])
     return JobCreateResponse(
@@ -643,7 +786,7 @@ async def api_get_session(session_id: str) -> dict[str, Any]:
         return {"session_id": session_id, "messages": [], "jobs": [], "active_jobs": []}
     # Attach recent/active jobs for reconnect
     active = jobstore.list_jobs(session_id=session_id, limit=20)
-    running = [j for j in active if j.get("status") in ("queued", "running")]
+    running = [j for j in active if j.get("status") in ("queued", "running", "awaiting_approval")]
     return {
         "session_id": session_id,
         "messages": data.get("messages") or [],

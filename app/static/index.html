@@ -762,6 +762,15 @@
       background: #34c759; color: #000;
     }
     .approval-card button.deny { background: #3a3a3c; color: var(--text); }
+    .approval-card button.once { background: #0a84ff; color: #fff; }
+    .approval-card[data-resolved="1"] { opacity: 0.72; }
+    .msg .md a[href*="/api/media/files/"] {
+      display: inline-flex; align-items: center; gap: 6px;
+      background: #1c3a28; color: #5ef08a !important; border: 1px solid #2a5a3c;
+      border-radius: 999px; padding: 8px 14px; margin: 6px 0; text-decoration: none !important;
+      font-weight: 700; font-size: 0.92rem;
+    }
+    .approval-card-marker { display: none; }
 
     .app-toast {
       position: fixed; left: 50%; bottom: calc(max(20px, var(--safe-bottom)) + 24px);
@@ -1451,6 +1460,12 @@
           })),
           session_id: sid,
           bot_id: sid,
+          instructions: (function () {
+            try {
+              const b = getActiveBot();
+              return (b && (b.instructions || b.systemPrompt || "")) || "";
+            } catch (_) { return ""; }
+          })(),
         }),
       });
       const data = await r.json().catch(() => ({}));
@@ -1487,9 +1502,11 @@
             throw new Error("Job not found on server");
           }
           if (onUpdate) onUpdate(job);
+          try { maybeRenderApprovalFromJob(job); } catch (_) {}
           if (job.status === "completed" || job.status === "failed" || job.status === "cancelled") {
             return job;
           }
+          // awaiting_approval / queued / running — keep polling; Approve resumes same job
           await sleep(delay);
           delay = Math.min(delay + 200, 2500);
         }
@@ -1534,6 +1551,7 @@
       ids.forEach((id) => {
         const st = (jobStatusCache[id] || "").toLowerCase();
         if (st === "queued") queued += 1;
+        else if (st === "awaiting_approval") running += 1;
         else running += 1; // running or unknown while polling
       });
       if (!n) {
@@ -1566,6 +1584,7 @@
             rememberBotJob(jobId, j.status);
             refreshWorkingStatus();
           }
+          try { maybeRenderApprovalFromJob(j); } catch (_) {}
         },
       });
 
@@ -1608,6 +1627,7 @@
               rememberBotJob(jobId, j.status);
               refreshWorkingStatus();
             }
+            try { maybeRenderApprovalFromJob(j); } catch (_) {}
           },
         });
         if (thinkingEl && thinkingEl.parentNode) thinkingEl.remove();
@@ -3492,45 +3512,90 @@
         saveSettings();
       } catch (_) {}
     }
-    function appendApprovalCard(tool, args, rules) {
+    function appendApprovalCard(payload) {
+      const approvalId = payload && (payload.approval_id || payload.id);
+      const tool = (payload && payload.tool) || "tool";
+      const args = (payload && payload.args) || {};
+      const summary = (payload && payload.args_summary) || JSON.stringify(args || {}).slice(0, 280);
+      const risk = (payload && payload.risk) || "";
+      const rules = (payload && payload.rules) || (settings.autoReviewRules || []);
+      if (!approvalId) return null;
+      const existing = document.querySelector('.approval-card[data-approval-id="' + approvalId + '"]');
+      if (existing) return existing;
       const card = document.createElement("div");
       card.className = "approval-card";
       card.dataset.live = "1";
-      const argStr = JSON.stringify(args || {}, null, 0).slice(0, 280);
-      card.innerHTML = '<p class="at">Auto-review · approval needed</p><p class="ad"></p><div class="aa"><button type="button" class="approve">Approve & continue</button><button type="button" class="deny">Deny</button></div>';
-      card.querySelector(".ad").textContent = "Tool: " + tool + "\n" + argStr + ((rules && rules.length) ? ("\nRules: " + rules.join("; ")) : "");
-      card.querySelector(".approve").addEventListener("click", async () => {
-        card.querySelector(".approve").disabled = true;
+      card.dataset.approvalId = approvalId;
+      card.setAttribute("data-approval-ui", "1");
+      card.innerHTML =
+        '<!-- nitc-approval-card -->' +
+        '<span class="approval-card-marker" data-nitc-approval="1"></span>' +
+        '<p class="at">Auto-review · approval needed</p>' +
+        '<p class="ad"></p>' +
+        '<div class="aa">' +
+        '<button type="button" class="approve">Approve</button>' +
+        '<button type="button" class="once">Allow once</button>' +
+        '<button type="button" class="deny">Decline</button>' +
+        '</div>';
+      const detail = "Tool: " + tool + (risk ? ("\\nRisk: " + risk) : "") + "\\n" + summary +
+        ((rules && rules.length) ? ("\\nRules: " + rules.join("; ")) : "");
+      card.querySelector(".ad").textContent = detail;
+      async function decide(kind) {
+        card.querySelectorAll("button").forEach((b) => { b.disabled = true; });
+        const path = kind === "decline"
+          ? "/api/approvals/" + encodeURIComponent(approvalId) + "/decline"
+          : (kind === "allow_once"
+            ? "/api/approvals/" + encodeURIComponent(approvalId) + "/allow-once"
+            : "/api/approvals/" + encodeURIComponent(approvalId) + "/approve");
         try {
-          await fetch("/api/settings/allow-once", { method: "POST", headers: authHeaders(), body: JSON.stringify({ tool, args: args || {} }) });
-          showAppToast("Approved — continuing");
-          input.value = "Approved. Please continue the previous action.";
-          autoResize(); updateSendMode(); form.requestSubmit();
-        } catch (e) { showAppToast("Approve failed: " + (e.message || e)); }
-        card.remove();
-      });
-      card.querySelector(".deny").addEventListener("click", () => {
-        card.remove();
-        appendMessage("system", "Denied — auto-review blocked " + tool);
-      });
+          const r = await fetch(path, { method: "POST", headers: authHeaders() });
+          const data = await r.json().catch(() => ({}));
+          if (!r.ok) throw new Error((data && data.detail) || ("HTTP " + r.status));
+          card.dataset.live = "0";
+          card.dataset.resolved = "1";
+          showAppToast(kind === "decline" ? "Declined" : "Approved — job resuming");
+          if (kind === "decline") {
+            appendMessage("system", "Declined `" + tool + "` — agent will adapt.");
+          }
+        } catch (e) {
+          showAppToast("Approval failed: " + (e.message || e));
+          card.querySelectorAll("button").forEach((b) => { b.disabled = false; });
+        }
+      }
+      card.querySelector(".approve").addEventListener("click", () => decide("approve"));
+      card.querySelector(".once").addEventListener("click", () => decide("allow_once"));
+      card.querySelector(".deny").addEventListener("click", () => decide("decline"));
       messagesEl.appendChild(card);
       messagesEl.scrollTop = messagesEl.scrollHeight;
+      return card;
+    }
+    function maybeRenderApprovalFromJob(job) {
+      if (!job) return;
+      const pending = job.pending_approval;
+      if (pending && pending.approval_id) {
+        appendApprovalCard(pending);
+        return;
+      }
+      const events = Array.isArray(job.events) ? job.events : [];
+      for (let i = events.length - 1; i >= 0; i--) {
+        const ev = events[i];
+        if (ev && ev.type === "approval" && (ev.status === "pending" || !ev.status) && ev.approval_id) {
+          appendApprovalCard(ev);
+          return;
+        }
+      }
     }
     function maybeShowApprovalsFromText(text) {
+      // Legacy fallback only — prefer structured job.pending_approval events.
       const raw = String(text || "");
-      if (!/needs_approval|auto_review_blocked|Auto-review is ON/i.test(raw)) return;
+      if (!/"needs_approval"\\s*:\\s*true|"approval_id"\\s*:/.test(raw)) return;
       if (document.querySelector(".approval-card[data-live='1']")) return;
-      let tool = "shell", args = {}, rules = settings.autoReviewRules || [];
       try {
-        const m = raw.match(/\{[\s\S]*?"needs_approval"\s*:\s*true[\s\S]*?\}/);
-        if (m) {
-          const obj = JSON.parse(m[0]);
-          tool = obj.tool || tool;
-          args = obj.args || {};
-          if (Array.isArray(obj.rules)) rules = obj.rules;
-        }
+        const m = raw.match(/\\{[\\s\\S]*?(needs_approval|approval_id)[\\s\\S]*?\\}/);
+        if (!m) return;
+        const obj = JSON.parse(m[0]);
+        if (obj.approval_id) appendApprovalCard(obj);
       } catch (_) {}
-      appendApprovalCard(tool, args, rules);
     }
 
 
@@ -3816,6 +3881,20 @@
         closeBotCtx();
         showAppToast(bot.hidden ? "Hidden — unhide from Profile" : "Unhid");
       });
+      
+      document.getElementById("ctx-instructions").addEventListener("click", () => {
+        const bot = getCtxBot();
+        if (!bot) return;
+        const cur = bot.systemPrompt || bot.instructions || "";
+        const v = prompt("Bot instructions (sent with each job)", cur);
+        if (v === null) { closeBotCtx(); return; }
+        bot.systemPrompt = v;
+        bot.instructions = v;
+        saveBots();
+        closeBotCtx();
+        showAppToast(v.trim() ? "Instructions saved" : "Instructions cleared");
+      });
+
       document.getElementById("ctx-copy-id").addEventListener("click", async () => {
         const bot = getCtxBot();
         if (!bot) return;
@@ -3936,7 +4015,7 @@
         <div class="ps-sec">Bot</div>
         <div class="ps-card">
           <div class="ps-row static">
-            <span class="ps-label"><span class="t">Auto-review</span><span class="s">Ask before risky shell, desktop, or network actions</span></span>
+            <span class="ps-label"><span class="t">Auto-review</span><span class="s">Ask before destructive shell, exfil-like network, or rule-matched actions</span></span>
             <button type="button" class="nitc-toggle" id="ps-auto-review" aria-label="Auto-review" aria-pressed="false"></button>
           </div>
           <button type="button" class="ps-row" data-nav="rules">
@@ -4130,6 +4209,7 @@
         <button type="button" class="danger" id="ctx-hide"><span class="mi">◉</span><span id="ctx-hide-label">Hide</span></button>
         <button type="button" id="ctx-more-toggle"><span class="mi">⋯</span>More<span class="chev" id="ctx-more-chev">›</span></button>
         <div class="bot-ctx-more" id="bot-ctx-more">
+          <button type="button" id="ctx-instructions"><span class="mi">✎</span>Instructions</button>
           <button type="button" id="ctx-copy-id"><span class="mi">ID</span>Copy ID</button>
           <button type="button" id="ctx-duplicate"><span class="mi">⧉</span>Duplicate</button>
           <button type="button" class="danger" id="ctx-delete"><span class="mi">⌫</span>Delete</button>

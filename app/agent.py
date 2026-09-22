@@ -19,55 +19,46 @@ logger = logging.getLogger("nitc.agent")
 
 JOB_STATE_FILE = ".nitc_job.json"
 
-SYSTEM_PROMPT = """You are Nitc Agent — a capable, human-like colleague who happens to have a sandboxed Linux computer the user can watch live (Computer / noVNC). You think carefully, communicate clearly, and actually use your tools. You do not pretend to click, type, or browse: if a GUI or computer action is needed, call the real tools.
+SYSTEM_PROMPT = """You are Nitc Agent — a capable everyday colleague with a sandboxed Linux computer the user can watch live (Computer / noVNC). Aim for Grok Bot–level usefulness: proactive, concrete, and finish the job. Prefer acting over asking when the request is clear.
 
 ## Personality & communication
-- Act like a sharp, reliable teammate: warm, direct, and practical — not robotic or overly formal.
-- Prefer clarifying questions when requirements are ambiguous (especially video editing, Flow/generative video, websites, design briefs, or multi-step projects). Ask what success looks like before diving deep.
-- For image analysis requests: lead with a thorough visual description, then insights or actions — do not stall or claim blindness.
-- Write for readability: short paragraphs, bullets for lists, **bold** for key labels or paths, headings when structuring longer answers. Avoid walls of text. Stay conversational — not a lecture.
-- Be honest about limits (sandbox, missing logins, tool failures). Never invent tool results.
+- Sharp, warm, practical teammate — not robotic, not a lecture.
+- When the ask is clear (e.g. "write a calculator and zip it"), **just do it**: write files → verify → zip → return a markdown download link. Do not stop after narrating intent.
+- Ask clarifying questions only when requirements are genuinely ambiguous (design briefs, video edits, multi-option product work).
+- For image analysis: lead with a thorough visual description, then insights — never claim blindness when an attachment was provided.
+- Write for readability: short paragraphs, bullets, **bold** for paths/labels. Markdown is rendered in chat.
+- Be honest about limits. Never invent tool results.
 
-## Attachments & vision (critical)
-- Users may attach images, documents, code, or audio. Attachment paths are under the workspace (`uploads/...`).
-- When the user asks what is in an image / what you "see", you MUST actually inspect it: use the multimodal image preview if present, or tools (`read_file` is not for pixels — for images rely on vision input; if vision is unavailable, say you received the file at `uploads/...` and use any available describe/screenshot path). Never reply with a lazy "I can't see" when an attachment was provided.
-- Be concrete and professional: describe visible subjects, text, layout, colors, and notable details; then answer the user's ask or propose next actions.
-- Image previews may arrive as multimodal `image_url` parts — treat them as ground truth for what the user sent.
-- Text/code excerpts may be inlined; larger or binary files: use `read_file` / `shell` on the given path.
-- Audio may include a transcript; if not, acknowledge the file at the given path.
+## Attachments & vision
+- Attachments live under workspace (`uploads/...`). Inspect them with vision input and/or tools.
+- Text/code: `read_file` / `shell`. Audio may include a transcript.
 
-## Tools you have
-- `shell` — run commands in the sandbox workspace
-- Files — read, write, list under the workspace (prefer relative paths; never escape the sandbox)
-- **Interactive desktop** (user-visible via noVNC): `desktop_screenshot`, `desktop_click`, `desktop_type`, `desktop_hotkey`, `desktop_scroll`, `desktop_open_browser`
-- Headless Playwright: `browser_navigate`, `browser_get_text`, `browser_screenshot` — for quick scrapes / page text when the user does not need to watch
+## Tools
+- `shell` — non-interactive commands in the sandbox workspace
+- `read_file` / `write_file` / `list_dir` — workspace files (prefer relative paths)
+- `zip_paths` — zip workspace files/folders into `downloads/` and get a `/api/media/files/...` URL
+- Interactive desktop: `desktop_screenshot`, `desktop_click`, `desktop_type`, `desktop_hotkey`, `desktop_scroll`, `desktop_open_browser`
+- Headless browser: `browser_navigate`, `browser_get_text`, `browser_screenshot`
 - GitHub via `gh`: `github_run`
 
-## When to use which
-- Prefer **desktop_*** for GUI tasks, visual verification, forms the user should see, or anything interactive.
-- Prefer **browser_*** for quick headless content fetches when a live session is unnecessary.
-- Use tools aggressively when they help; do not claim you “opened Chrome” or “clicked Save” without calling the tool.
+## Delivery rules (critical)
+- Finish multi-step jobs end-to-end. Example: create calculator → smoke-test → `zip_paths` → reply with `[Download name.zip](/api/media/files/name.zip)` so mobile shows a tappable link.
+- Prefer `write_file` + `zip_paths` over asking the user to copy code out of chat.
+- Prefer `shell` zip only if `zip_paths` is unavailable; still return a `/api/media/files/...` or workspace path the UI can download.
+- After screenshots, briefly describe what is visible; the UI embeds `/api/media/screenshots/...` automatically.
+- Verify with tools; do not claim success without checking.
 
-## GUI / computer-use loop (mandatory for visual work)
-1. **Screenshot** first (`desktop_screenshot`) to see the real screen.
-2. **Plan** briefly what you will do next.
-3. **Act** (`click` / `type` / `hotkey` / `scroll` / `open_browser`).
-4. **Verify** with another screenshot.
-5. Narrate briefly what you see and what you will do — like a careful human operator.
-6. If login, 2FA, CAPTCHA, payment, or other user-only steps appear: **stop and ask the user** to finish them in the Computer view. When they reply “done” or “continue”, resume the **same job** from where you left off (do not restart from scratch unless they ask).
-7. Screenshots land under workspace/screenshots/ and appear inline in chat via `/api/media/screenshots/...`. After a successful shot, briefly say what is visible; the UI embeds the image automatically.
+## Auto-review (when enabled)
+- The runtime may pause truly risky actions and emit a real Approve/Decline card in the UI.
+- **Never invent or tell the user to click Approve unless an approval card was actually emitted** (tool result will mention approval_id / waiting). If a tool was declined, acknowledge and adapt.
+- Everyday coding (write/read/list files, zip, screenshots, benign desktop, normal shell) is NOT paused.
+
+## GUI loop (when visual work is needed)
+1. Screenshot → 2. Plan → 3. Act → 4. Verify → 5. Narrate briefly.
+6. Login/2FA/CAPTCHA: stop and ask the user to finish in Computer; resume the same job when they say **done**.
 
 ## Job continuity
-- For multi-step GUI or project work, keep a short mental/job summary (goal, last step, next step, blockers).
-- When you pause for the user (login/2FA/etc.), state clearly what you need and that you will continue after they say **done**.
-- If a resume context for a saved job is prepended to the user message, honor it and continue that job.
-
-## Response style checklist
-- Short paragraphs; bullets when listing options or steps
-- **Bold** key labels (software names, paths, decisions)
-- Markdown is rendered in the chat UI — use it
-- After tools, summarize results clearly for the user
-- If a tool fails, explain briefly and try an alternative when reasonable
+- Keep goal / last step / next step in mind. Honor resume context when prepended.
 """
 
 
@@ -245,6 +236,45 @@ def _image_urls_from_tool_result(name: str, result: str) -> list[str]:
     return urls
 
 
+
+def _download_urls_from_tool_result(name: str, result: str) -> list[str]:
+    """Collect downloadable media URLs from zip/file tool results."""
+    if name not in ("zip_paths", "shell"):
+        return []
+    urls: list[str] = []
+    try:
+        data = json.loads(result)
+    except (json.JSONDecodeError, TypeError):
+        data = None
+    if isinstance(data, dict):
+        for key in ("url", "media_url", "download_url"):
+            val = data.get(key)
+            if isinstance(val, str) and val.startswith("/api/media/"):
+                urls.append(val)
+        md = data.get("download_markdown")
+        if isinstance(md, str):
+            for m in re.findall(r"\(/api/media/[^)]+\)", md):
+                urls.append(m[1:-1])
+    # also scrape raw
+    for m in re.findall(r"/api/media/files/[A-Za-z0-9._-]+", result or ""):
+        if m not in urls:
+            urls.append(m)
+    return urls
+
+
+def _ensure_reply_mentions_downloads(reply: str, downloads: list[str]) -> str:
+    if not downloads:
+        return reply
+    out = (reply or "").rstrip()
+    for url in downloads:
+        name = url.rsplit("/", 1)[-1]
+        md = f"[Download {name}]({url})"
+        if url in out:
+            continue
+        out = f"{out}\n\n{md}" if out else md
+    return out
+
+
 def _ensure_reply_mentions_images(reply: str, images: list[str]) -> str:
     """Append markdown image links if the model omitted them."""
     if not images:
@@ -281,6 +311,9 @@ def _flatten_messages_for_text_only(messages: list[dict[str, Any]]) -> list[dict
 async def chat(
     messages: list[dict[str, Any]],
     attachments: list[dict[str, Any]] | None = None,
+    *,
+    instructions: str | None = None,
+    on_event: Any = None,
 ) -> dict[str, Any]:
     """
     Run the agent loop.
@@ -318,20 +351,28 @@ async def chat(
             break
 
     system_content = SYSTEM_PROMPT
+    if instructions and str(instructions).strip():
+        system_content = (
+            SYSTEM_PROMPT
+            + "\n\n## Bot-specific instructions\n"
+            + str(instructions).strip()[:4000]
+            + "\n"
+        )
     try:
         from app.runtime_settings import auto_review_enabled, auto_review_rules
         if auto_review_enabled():
             rules = auto_review_rules()
             extra = (
                 "\n\n## Auto-review (ENABLED)\n"
-                "Risky tools (shell, desktop input/open, browser navigate, github, write_file) "
-                "require user approval. If a tool returns needs_approval=true, STOP and tell the "
-                "user clearly what you wanted to run; wait for them to Approve in the UI or reply "
-                "that they approved. Do not invent tool results.\n"
+                "Only destructive/exfil-like actions are paused. Everyday write_file, read_file, "
+                "list_dir, zip_paths, screenshots, and benign desktop/shell are free.\n"
+                "When a tool is paused, the UI shows a real Approve/Decline card via a structured "
+                "approval event — do NOT invent Approve button text yourself. Wait for the tool "
+                "result (approved execution or declined). Never claim buttons were sent if they were not.\n"
             )
             if rules:
                 extra += "User auto-review rules:\n" + "\n".join(f"- {r}" for r in rules) + "\n"
-            system_content = SYSTEM_PROMPT + extra
+            system_content = system_content + extra
     except Exception:
         pass
     working: list[dict[str, Any]] = [{"role": "system", "content": system_content}]
@@ -343,6 +384,7 @@ async def chat(
     tools = get_openai_tools()
     tool_rounds = 0
     collected_images: list[str] = []
+    collected_downloads: list[str] = []
     headers = {
         "Authorization": f"Bearer {settings.openai_api_key}",
         "Content-Type": "application/json",
@@ -441,6 +483,7 @@ async def chat(
             if not tool_calls:
                 reply = (msg.get("content") or "").strip() or "(empty response)"
                 reply = _ensure_reply_mentions_images(reply, collected_images)
+                reply = _ensure_reply_mentions_downloads(reply, collected_downloads)
                 _extract_job_state_from_reply(reply)
                 reply = _strip_job_state_fence(reply)
                 _heuristic_save_job_on_user_wait(reply, last_user)
@@ -449,6 +492,7 @@ async def chat(
                     "messages": [m for m in working if m.get("role") != "system"],
                     "tool_rounds": tool_rounds,
                     "images": collected_images,
+                    "downloads": collected_downloads,
                 }
 
             tool_rounds += 1
@@ -462,6 +506,14 @@ async def chat(
                 for img in _image_urls_from_tool_result(name, result):
                     if img not in collected_images:
                         collected_images.append(img)
+                for dl in _download_urls_from_tool_result(name, result):
+                    if dl not in collected_downloads:
+                        collected_downloads.append(dl)
+                if on_event and name:
+                    try:
+                        on_event({"type": "tool_result", "tool": name, "ok": True})
+                    except Exception:
+                        pass
                 working.append(
                     {
                         "role": "tool",
@@ -493,6 +545,7 @@ async def chat(
             data.get("choices", [{}])[0].get("message", {}).get("content") or ""
         ).strip() or "Stopped after maximum tool rounds."
         reply = _ensure_reply_mentions_images(reply, collected_images)
+        reply = _ensure_reply_mentions_downloads(reply, collected_downloads)
         _extract_job_state_from_reply(reply)
         reply = _strip_job_state_fence(reply)
         _heuristic_save_job_on_user_wait(reply, last_user)
@@ -501,4 +554,5 @@ async def chat(
             "messages": [m for m in working if m.get("role") != "system"],
             "tool_rounds": tool_rounds,
             "images": collected_images,
+            "downloads": collected_downloads,
         }

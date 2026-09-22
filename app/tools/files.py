@@ -62,3 +62,67 @@ def list_dir(path: str = ".") -> str:
             }
         )
     return json.dumps({"ok": True, "path": path or ".", "entries": entries})
+
+
+def zip_paths(paths: list[str] | None = None, output: str | None = None) -> str:
+    """Zip workspace-relative paths into workspace/downloads/ and return a media URL."""
+    import zipfile
+    from datetime import datetime, timezone
+
+    workspace = get_settings().workspace_path
+    downloads = workspace / "downloads"
+    downloads.mkdir(parents=True, exist_ok=True)
+
+    srcs = paths or ["."]
+    if isinstance(srcs, str):
+        srcs = [srcs]
+    resolved: list[Path] = []
+    for p in srcs:
+        try:
+            target = _resolve_safe(str(p))
+        except ValueError as exc:
+            return json.dumps({"ok": False, "error": str(exc)})
+        if not target.exists():
+            return json.dumps({"ok": False, "error": f"Not found: {p}"})
+        resolved.append(target)
+
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    out_name = (output or f"bundle-{stamp}.zip").strip()
+    out_name = Path(out_name).name
+    if not out_name.lower().endswith(".zip"):
+        out_name += ".zip"
+    out_path = downloads / out_name
+    # avoid clobber
+    if out_path.exists():
+        out_path = downloads / f"{out_path.stem}-{stamp}.zip"
+        out_name = out_path.name
+
+    try:
+        with zipfile.ZipFile(out_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            for target in resolved:
+                if target.is_file():
+                    arc = str(target.relative_to(workspace))
+                    zf.write(target, arcname=arc)
+                else:
+                    for child in target.rglob("*"):
+                        if child.is_file():
+                            # skip nested downloads of previous zips optionally
+                            if "downloads" in child.parts and child.suffix == ".zip":
+                                continue
+                            arc = str(child.relative_to(workspace))
+                            zf.write(child, arcname=arc)
+    except OSError as exc:
+        return json.dumps({"ok": False, "error": str(exc)})
+
+    rel = f"downloads/{out_name}"
+    url = f"/api/media/files/{out_name}"
+    return json.dumps(
+        {
+            "ok": True,
+            "path": rel,
+            "filename": out_name,
+            "url": url,
+            "bytes": out_path.stat().st_size,
+            "download_markdown": f"[Download {out_name}]({url})",
+        }
+    )

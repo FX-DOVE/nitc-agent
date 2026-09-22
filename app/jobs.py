@@ -89,6 +89,21 @@ def save_job(job: dict[str, Any]) -> None:
 
 def public_job(job: dict[str, Any]) -> dict[str, Any]:
     """Strip bulky internal fields for API responses."""
+    pending = None
+    for ev in reversed(list(job.get("events") or [])):
+        if ev.get("type") == "approval" and ev.get("status") == "pending":
+            pending = {
+                "type": "approval",
+                "approval_id": ev.get("approval_id"),
+                "tool": ev.get("tool"),
+                "args_summary": ev.get("args_summary"),
+                "risk": ev.get("risk"),
+                "args": ev.get("args") or {},
+                "rules": ev.get("rules") or [],
+            }
+            break
+        if ev.get("type") == "approval" and ev.get("status") in ("approved", "declined"):
+            break
     return {
         "id": job.get("id"),
         "job_id": job.get("id"),
@@ -103,10 +118,13 @@ def public_job(job: dict[str, Any]) -> dict[str, Any]:
         "reply": job.get("reply"),
         "tool_rounds": job.get("tool_rounds", 0),
         "images": job.get("images") or [],
+        "downloads": job.get("downloads") or [],
         "events": job.get("events") or [],
         "user_message": job.get("user_message"),
         "attachments": job.get("attachments") or [],
         "partial_reply": job.get("partial_reply") or "",
+        "pending_approval": pending,
+        "instructions": job.get("instructions") or "",
     }
 
 
@@ -125,6 +143,7 @@ def create_job(
     attachments: list[dict[str, Any]] | None = None,
     session_id: str | None = None,
     bot_id: str | None = None,
+    instructions: str | None = None,
 ) -> dict[str, Any]:
     job_id = uuid.uuid4().hex
     sid = (bot_id or session_id or "default").strip() or "default"
@@ -162,6 +181,8 @@ def create_job(
         "attachments": atts,
         "messages": messages,
         "result_messages": [],
+        "instructions": (instructions or "").strip()[:4000],
+        "downloads": [],
     }
     append_event(job, "queued", message="Job accepted")
     save_job(job)
@@ -305,12 +326,57 @@ async def _run_job(job_id: str) -> None:
     append_event(job, "running", message="Agent loop started")
     save_job(job)
 
+    token = None
     try:
+        from app import approvals as approval_store
+
+        def _sink(payload: dict[str, Any]) -> None:
+            cur = load_job(job_id)
+            if not cur:
+                return
+            # Mark previous pending approvals resolved if a new one arrives with status
+            append_event(
+                cur,
+                "approval",
+                approval_id=payload.get("approval_id"),
+                tool=payload.get("tool"),
+                args_summary=payload.get("args_summary"),
+                risk=payload.get("risk"),
+                args=payload.get("args") or {},
+                rules=payload.get("rules") or [],
+                status=payload.get("status") or "pending",
+                message="Waiting for Approve/Decline",
+            )
+            if (payload.get("status") or "pending") == "pending":
+                cur["status"] = "awaiting_approval"
+                cur["partial_reply"] = (
+                    f"Auto-review: approval needed for `{payload.get('tool')}` — "
+                    f"{payload.get('args_summary') or ''}"
+                )[:500]
+            save_job(cur)
+
+        token = approval_store.bind_job(job_id, _sink)
         messages = list(job.get("messages") or [])
         attachments = list(job.get("attachments") or [])
-        result = await agent_chat(messages, attachments=attachments or None)
+        instructions = job.get("instructions") or ""
+
+        def _on_event(ev: dict[str, Any]) -> None:
+            cur = load_job(job_id)
+            if not cur:
+                return
+            if ev.get("type") == "tool_result" and cur.get("status") == "awaiting_approval":
+                cur["status"] = "running"
+                save_job(cur)
+
+        result = await agent_chat(
+            messages,
+            attachments=attachments or None,
+            instructions=instructions or None,
+            on_event=_on_event,
+        )
         reply = result.get("reply") or ""
         images = result.get("images") or []
+        downloads = result.get("downloads") or []
         tool_rounds = int(result.get("tool_rounds") or 0)
 
         job = load_job(job_id) or job
@@ -319,6 +385,7 @@ async def _run_job(job_id: str) -> None:
         job["reply"] = reply
         job["partial_reply"] = reply
         job["images"] = images
+        job["downloads"] = downloads
         job["tool_rounds"] = tool_rounds
         job["result_messages"] = result.get("messages") or []
         job["error"] = None
@@ -349,6 +416,12 @@ async def _run_job(job_id: str) -> None:
             "failed",
         )
     finally:
+        try:
+            from app import approvals as approval_store
+            if token is not None:
+                approval_store.unbind(token)
+        except Exception:
+            pass
         _running.pop(job_id, None)
 
 
@@ -443,9 +516,9 @@ async def recover_queued_jobs() -> None:
             continue
         status = data.get("status")
         job_id = data.get("id")
-        if not job_id or status not in ("queued", "running"):
+        if not job_id or status not in ("queued", "running", "awaiting_approval"):
             continue
-        if status == "running":
+        if status in ("running", "awaiting_approval"):
             data["status"] = "queued"
             data["error"] = "Recovered after server restart"
             append_event(data, "recovered", message="Re-queued after restart")
@@ -469,6 +542,7 @@ async def retry_job(job_id: str) -> dict[str, Any] | None:
         attachments=list(old.get("attachments") or []),
         session_id=old.get("session_id"),
         bot_id=old.get("bot_id"),
+        instructions=old.get("instructions"),
     )
     new["retried_from"] = job_id
     append_event(new, "retry", message=f"Retry of {job_id}")

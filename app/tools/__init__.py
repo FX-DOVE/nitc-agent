@@ -92,6 +92,34 @@ TOOL_SPECS: list[dict[str, Any]] = [
             },
         },
     },
+
+    {
+        "type": "function",
+        "function": {
+            "name": "zip_paths",
+            "description": (
+                "Zip one or more workspace-relative files/folders into workspace/downloads/ "
+                "and return a downloadable /api/media/files/... URL. Use after creating files "
+                "when the user wants a zip/download."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "paths": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Relative paths under workspace to include",
+                    },
+                    "output": {
+                        "type": "string",
+                        "description": "Optional zip filename (stored under downloads/)",
+                    },
+                },
+                "required": ["paths"],
+            },
+        },
+    },
+
     {
         "type": "function",
         "function": {
@@ -310,6 +338,7 @@ HANDLERS: dict[str, ToolHandler] = {
     "read_file": files.read_file,
     "write_file": files.write_file,
     "list_dir": files.list_dir,
+    "zip_paths": files.zip_paths,
     "browser_navigate": browser.browser_navigate,
     "browser_get_text": browser.browser_get_text,
     "browser_screenshot": browser.browser_screenshot,
@@ -342,32 +371,54 @@ async def run_tool(name: str, arguments: dict[str, Any] | str | None) -> str:
     else:
         args = arguments
 
-    # Auto-review gate for risky shell/desktop/network tools
+    # Smart Auto-review: pause only truly risky actions; emit approval card; wait for decision
+    approval_gated = False
     try:
         from app.runtime_settings import (
-            RISKY_TOOLS,
-            auto_review_enabled,
             auto_review_rules,
             consume_allow_once,
+            should_require_approval,
         )
-        if name in RISKY_TOOLS and auto_review_enabled():
-            if not consume_allow_once(name, args):
-                rules = auto_review_rules()
+        from app import approvals as approval_store
+
+        needs, risk = should_require_approval(name, args)
+        if needs and consume_allow_once(name, args):
+            needs = False
+        if needs:
+            approval_gated = True
+            rules = auto_review_rules()
+            job_id = approval_store.current_job_id()
+            rec = approval_store.create_approval(
+                tool=name,
+                args=args,
+                job_id=job_id,
+                risk=risk or "medium",
+                rules=rules,
+            )
+            approval_store.emit_approval_event(rec)
+            decision = await approval_store.wait_for_decision(rec["id"], timeout=600.0)
+            if decision == "decline":
                 return json.dumps({
-                    "needs_approval": True,
-                    "auto_review": True,
+                    "ok": False,
+                    "declined": True,
+                    "needs_approval": False,
+                    "approval_id": rec["id"],
                     "tool": name,
-                    "args": args,
-                    "rules": rules,
-                    "error": "auto_review_blocked",
+                    "error": "user_declined",
                     "message": (
-                        "Auto-review is ON. This risky action was paused for user approval. "
-                        "Do not retry the same tool until the user Approves in the chat UI "
-                        "(or says they approved). Summarize what you wanted to do and wait."
+                        "User declined this action in Auto-review. "
+                        "Do not claim Approve buttons were shown beyond the declined card. "
+                        "Continue with a safer alternative or ask what to do next."
                     ),
                 })
-    except Exception:  # noqa: BLE001
-        pass
+            # approved / allow_once — fall through and execute
+    except Exception as exc:  # noqa: BLE001
+        if approval_gated:
+            return json.dumps({
+                "ok": False,
+                "error": "approval_flow_failed",
+                "message": f"Auto-review pause failed: {exc}",
+            })
 
     # Plugin disable gate
     try:
@@ -375,7 +426,7 @@ async def run_tool(name: str, arguments: dict[str, Any] | str | None) -> str:
         plugs = (load_settings().get("plugins") or {})
         plugin_for = {
             "shell": "shell",
-            "read_file": "files", "write_file": "files", "list_dir": "files",
+            "read_file": "files", "write_file": "files", "list_dir": "files", "zip_paths": "files",
             "browser_navigate": "browser", "browser_get_text": "browser", "browser_screenshot": "browser",
             "github_run": "github",
             "desktop_screenshot": "desktop", "desktop_click": "desktop", "desktop_type": "desktop",
