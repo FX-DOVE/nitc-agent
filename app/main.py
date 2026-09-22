@@ -69,8 +69,9 @@ def _novnc_upstream() -> str:
 
 
 def _novnc_embed_url() -> str:
-    # path= tells noVNC to open the WebSocket under /novnc/websockify (same origin).
-    return "/novnc/vnc.html?autoconnect=1&resize=scale&path=novnc/websockify"
+    # Page lives at /novnc/vnc.html — path must be relative "websockify" (NOT "novnc/websockify"),
+    # otherwise noVNC resolves to /novnc/novnc/websockify and fails with "Failed to connect".
+    return "/novnc/vnc.html?autoconnect=1&resize=scale&path=websockify"
 
 
 @app.get("/health")
@@ -226,19 +227,24 @@ async def novnc_http_proxy(full_path: str, request: Request) -> Response:
 
 @app.websocket("/novnc/{full_path:path}")
 async def novnc_ws_proxy(websocket: WebSocket, full_path: str) -> None:
-    await websocket.accept()
     base = _novnc_upstream().replace("https://", "wss://").replace("http://", "ws://")
-    target = f"{base}/{full_path}"
+    # Client may request /novnc/websockify — upstream websockify listens at /websockify
+    upstream_path = full_path
+    if full_path.startswith("novnc/"):
+        upstream_path = full_path[len("novnc/"):]
+    if upstream_path in ("", "websockify", "websockify/"):
+        upstream_path = "websockify"
+    target = f"{base}/{upstream_path}"
     if websocket.scope.get("query_string"):
         qs = websocket.scope["query_string"].decode("utf-8", errors="replace")
         if qs:
             target = f"{target}?{qs}"
 
-    # Prefer binary subprotocol used by websockify / noVNC when offered.
     subprotocols: list[str] = []
     proto_header = websocket.headers.get("sec-websocket-protocol")
     if proto_header:
         subprotocols = [p.strip() for p in proto_header.split(",") if p.strip()]
+    chosen = subprotocols[0] if subprotocols else None
 
     try:
         async with websockets.connect(
@@ -247,6 +253,8 @@ async def novnc_ws_proxy(websocket: WebSocket, full_path: str) -> None:
             open_timeout=15,
             max_size=8 * 1024 * 1024,
         ) as upstream:
+            # Accept only after upstream is up, with matching subprotocol for noVNC.
+            await websocket.accept(subprotocol=chosen)
             async def client_to_upstream() -> None:
                 try:
                     while True:

@@ -791,7 +791,7 @@
     });
 
     async function loadConfig() {
-      const fallback = "/novnc/vnc.html?autoconnect=1&resize=scale&path=novnc/websockify";
+      const fallback = "/novnc/vnc.html?autoconnect=1&resize=scale&path=websockify";
       try {
         const r = await fetch("/api/config");
         const data = await r.json();
