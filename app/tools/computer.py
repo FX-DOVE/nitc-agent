@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -14,6 +15,17 @@ _TIMEOUT = httpx.Timeout(60.0, connect=10.0)
 
 def _base_url() -> str:
     return get_settings().desktop_api_url.rstrip("/")
+
+
+def _with_media_url(data: dict[str, Any]) -> dict[str, Any]:
+    """Attach a same-origin media URL so the chat UI can display the PNG."""
+    if not data.get("ok"):
+        return data
+    path = data.get("path") or ""
+    fname = Path(str(path)).name
+    if fname and fname.lower().endswith((".png", ".jpg", ".jpeg", ".webp", ".gif")):
+        data["url"] = f"/api/media/screenshots/{fname}"
+    return data
 
 
 async def _post(path: str, payload: dict[str, Any] | None = None) -> str:
@@ -64,7 +76,8 @@ async def desktop_screenshot(filename: str | None = None) -> str:
                         "detail": resp.text[:1500],
                     }
                 )
-            return json.dumps(resp.json())
+            data = resp.json()
+            return json.dumps(_with_media_url(data))
     except httpx.ConnectError as exc:
         return json.dumps(
             {

@@ -10,7 +10,8 @@ export XDG_DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
 export XDG_CACHE_HOME="${XDG_CACHE_HOME:-$HOME/.cache}"
 export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/tmp/runtime-desktop}"
 export GTK_THEME="${GTK_THEME:-Greybird}"
-VNC_PASSWORD="${VNC_PASSWORD:-nitc}"
+VNC_PASSWORD="${VNC_PASSWORD:-}"
+VNC_NO_PASSWORD="${VNC_NO_PASSWORD:-0}"
 SCREEN_WIDTH="${SCREEN_WIDTH:-1280}"
 SCREEN_HEIGHT="${SCREEN_HEIGHT:-800}"
 SCREEN_DEPTH="${SCREEN_DEPTH:-24}"
@@ -50,13 +51,21 @@ for f in "$HOME/Desktop"/*.desktop; do
   fi
 done
 
-PASS="${VNC_PASSWORD:0:8}"
-if ! x11vnc -storepasswd "$PASS" "$HOME/.vnc/passwd" >/tmp/vnc_store.log 2>&1; then
-  echo "[entrypoint] storepasswd failed; will use -passwd" >&2
-  USE_PASSWD_ARG=1
+USE_NOPW=0
+USE_PASSWD_ARG=0
+PASS=""
+if [[ -z "${VNC_PASSWORD}" || "${VNC_NO_PASSWORD}" == "1" ]]; then
+  USE_NOPW=1
+  echo "[entrypoint] VNC password disabled (VNC_NO_PASSWORD=1 or empty VNC_PASSWORD)"
 else
-  chmod 600 "$HOME/.vnc/passwd"
-  USE_PASSWD_ARG=0
+  PASS="${VNC_PASSWORD:0:8}"
+  if ! x11vnc -storepasswd "$PASS" "$HOME/.vnc/passwd" >/tmp/vnc_store.log 2>&1; then
+    echo "[entrypoint] storepasswd failed; will use -passwd" >&2
+    USE_PASSWD_ARG=1
+  else
+    chmod 600 "$HOME/.vnc/passwd"
+    USE_PASSWD_ARG=0
+  fi
 fi
 
 if [[ -z "${DBUS_SESSION_BUS_ADDRESS:-}" ]] && command -v dbus-launch >/dev/null 2>&1; then
@@ -126,7 +135,17 @@ if command -v hsetroot >/dev/null 2>&1 && [[ -f "$WALL" ]]; then
 fi
 
 echo "[entrypoint] Starting x11vnc on :${VNC_PORT}"
-if [[ "${USE_PASSWD_ARG:-0}" == "1" ]]; then
+if [[ "${USE_NOPW:-0}" == "1" ]]; then
+  x11vnc \
+    -display "$DISPLAY" \
+    -rfbport "$VNC_PORT" \
+    -nopw \
+    -forever \
+    -shared \
+    -noxdamage \
+    -repeat \
+    -o /tmp/x11vnc.log &
+elif [[ "${USE_PASSWD_ARG:-0}" == "1" ]]; then
   x11vnc \
     -display "$DISPLAY" \
     -rfbport "$VNC_PORT" \

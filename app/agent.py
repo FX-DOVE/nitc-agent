@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -29,8 +30,53 @@ Guidelines:
 - Prefer workspace-relative paths; never try to escape the sandbox.
 - After using tools, summarize results clearly for the user.
 - If a tool fails, explain briefly and try an alternative when reasonable.
-- Desktop screenshots are saved under workspace/screenshots/ and are visible to the user in the Computer panel (noVNC).
+- Desktop / browser screenshots are saved under workspace/screenshots/ and are **shown inline in chat** via `/api/media/screenshots/...`. After a successful screenshot, briefly mention what is visible; the UI also embeds the image automatically.
 """
+
+_SCREENSHOT_TOOLS = frozenset({"desktop_screenshot", "browser_screenshot"})
+
+
+def _image_urls_from_tool_result(name: str, result: str) -> list[str]:
+    """Collect media URLs from screenshot tool JSON results."""
+    if name not in _SCREENSHOT_TOOLS:
+        return []
+    try:
+        data = json.loads(result)
+    except (json.JSONDecodeError, TypeError):
+        return []
+    if not isinstance(data, dict) or not data.get("ok", True):
+        # desktop/browser return ok:false on failure; skip
+        if data.get("ok") is False:
+            return []
+
+    urls: list[str] = []
+    for key in ("url", "image_url", "media_url"):
+        val = data.get(key)
+        if isinstance(val, str) and val.startswith("/api/media/screenshots/"):
+            urls.append(val)
+
+    path = data.get("path")
+    if isinstance(path, str) and path:
+        # path like screenshots/foo.png or absolute ending in screenshots/foo.png
+        fname = Path(path).name
+        if fname.lower().endswith((".png", ".jpg", ".jpeg", ".webp", ".gif")):
+            media = f"/api/media/screenshots/{fname}"
+            if media not in urls:
+                urls.append(media)
+    return urls
+
+
+def _ensure_reply_mentions_images(reply: str, images: list[str]) -> str:
+    """Append markdown image links if the model omitted them."""
+    if not images:
+        return reply
+    out = (reply or "").rstrip()
+    for img in images:
+        md = f"![desktop]({img})"
+        if img in out or md in out:
+            continue
+        out = f"{out}\n\n{md}" if out else md
+    return out
 
 
 async def chat(messages: list[dict[str, Any]]) -> dict[str, Any]:
@@ -42,6 +88,7 @@ async def chat(messages: list[dict[str, Any]]) -> dict[str, Any]:
           "reply": str,
           "messages": [...full conversation including tool turns...],
           "tool_rounds": int,
+          "images": ["/api/media/screenshots/..."],
         }
     """
     settings = get_settings()
@@ -50,9 +97,9 @@ async def chat(messages: list[dict[str, Any]]) -> dict[str, Any]:
             "reply": "Configuration error: OPENAI_API_KEY is not set. Copy .env.example to .env and add your key.",
             "messages": messages,
             "tool_rounds": 0,
+            "images": [],
         }
 
-    # Build working history with system prompt first
     working: list[dict[str, Any]] = [{"role": "system", "content": SYSTEM_PROMPT}]
     for m in messages:
         role = m.get("role")
@@ -61,11 +108,11 @@ async def chat(messages: list[dict[str, Any]]) -> dict[str, Any]:
 
     tools = get_openai_tools()
     tool_rounds = 0
+    collected_images: list[str] = []
     headers = {
         "Authorization": f"Bearer {settings.openai_api_key}",
         "Content-Type": "application/json",
     }
-    # OpenRouter optional headers (harmless for other providers)
     if "openrouter.ai" in settings.openai_base_url:
         headers["HTTP-Referer"] = "https://github.com/FX-DOVE/nitc-agent"
         headers["X-Title"] = "Nitc Agent"
@@ -87,6 +134,7 @@ async def chat(messages: list[dict[str, Any]]) -> dict[str, Any]:
                     "reply": f"LLM API error {resp.status_code}: {err_text}",
                     "messages": messages,
                     "tool_rounds": tool_rounds,
+                    "images": collected_images,
                 }
 
             data = resp.json()
@@ -98,9 +146,9 @@ async def chat(messages: list[dict[str, Any]]) -> dict[str, Any]:
                     "reply": f"Unexpected API response: {json.dumps(data)[:1500]}",
                     "messages": messages,
                     "tool_rounds": tool_rounds,
+                    "images": collected_images,
                 }
 
-            # Normalize assistant message for history
             assistant_msg: dict[str, Any] = {
                 "role": "assistant",
                 "content": msg.get("content") or "",
@@ -112,13 +160,14 @@ async def chat(messages: list[dict[str, Any]]) -> dict[str, Any]:
 
             if not tool_calls:
                 reply = (msg.get("content") or "").strip() or "(empty response)"
+                reply = _ensure_reply_mentions_images(reply, collected_images)
                 return {
                     "reply": reply,
                     "messages": [m for m in working if m.get("role") != "system"],
                     "tool_rounds": tool_rounds,
+                    "images": collected_images,
                 }
 
-            # Execute each tool call
             tool_rounds += 1
             for tc in tool_calls:
                 fn = tc.get("function") or {}
@@ -127,6 +176,9 @@ async def chat(messages: list[dict[str, Any]]) -> dict[str, Any]:
                 tc_id = tc.get("id") or f"call_{tool_rounds}"
                 logger.info("tool_call name=%s args=%s", name, raw_args[:200])
                 result = await run_tool(name, raw_args)
+                for img in _image_urls_from_tool_result(name, result):
+                    if img not in collected_images:
+                        collected_images.append(img)
                 working.append(
                     {
                         "role": "tool",
@@ -135,7 +187,6 @@ async def chat(messages: list[dict[str, Any]]) -> dict[str, Any]:
                     }
                 )
 
-        # Hit max rounds — ask model for a final answer without tools
         payload = {
             "model": settings.model,
             "messages": working
@@ -152,13 +203,16 @@ async def chat(messages: list[dict[str, Any]]) -> dict[str, Any]:
                 "reply": f"Reached tool limit ({settings.max_tool_rounds}) and final call failed: {resp.text[:1000]}",
                 "messages": [m for m in working if m.get("role") != "system"],
                 "tool_rounds": tool_rounds,
+                "images": collected_images,
             }
         data = resp.json()
         reply = (
             data.get("choices", [{}])[0].get("message", {}).get("content") or ""
         ).strip() or "Stopped after maximum tool rounds."
+        reply = _ensure_reply_mentions_images(reply, collected_images)
         return {
             "reply": reply,
             "messages": [m for m in working if m.get("role") != "system"],
             "tool_rounds": tool_rounds,
+            "images": collected_images,
         }

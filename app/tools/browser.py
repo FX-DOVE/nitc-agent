@@ -99,11 +99,14 @@ async def browser_screenshot(url: str | None = None, filename: str | None = None
     out = shot_dir / name
     await page.screenshot(path=str(out), full_page=False)
     rel = f"screenshots/{name}"
+    media = f"/api/media/screenshots/{name}"
     return json.dumps(
         {
             "ok": True,
             "url": page.url,
+            "page_url": page.url,
             "path": rel,
+            "image_url": media,
             "absolute": str(out),
         }
     )

@@ -14,7 +14,7 @@ Self-hosted AI agent with a web chat UI, tool-calling loop, sandboxed shell/file
 | **Interactive desktop** | `desktop_screenshot`, `desktop_click`, `desktop_type`, `desktop_hotkey`, `desktop_scroll`, `desktop_open_browser` |
 | Browser (headless) | `browser_navigate`, `browser_get_text`, `browser_screenshot` (Playwright) |
 | GitHub | `github_run` — wraps `gh` with `GITHUB_TOKEN` |
-| Watch / take over | noVNC on port **6080** (Computer view) |
+| Watch / take over | noVNC via **`/novnc/`** on port **8080** (Computer view; :6080 optional direct) |
 
 ## Architecture (Phase 2)
 
@@ -22,13 +22,13 @@ Self-hosted AI agent with a web chat UI, tool-calling loop, sandboxed shell/file
 ┌────────────────────┐     Docker network `nitc`     ┌──────────────────────────┐
 │  agent (:8080)     │  HTTP computer tools           │  desktop                 │
 │  FastAPI chat UI   │ ────────────────────────────► │  Xvfb + XFCE (lean)      │
-│  + tool loop       │    http://desktop:7090         │  Chromium, Thunar, term  │
-│                    │                                │  desktop-api (:7090)     │
+│  + /novnc/ proxy   │    http://desktop:7090         │  Chromium, Thunar, term  │
+│  + media screenshots│   WS/HTTP /novnc → :6080      │  desktop-api (:7090)     │
 │                    │   shared volume ./workspace    │  x11vnc + noVNC (:6080)  │
 └────────────────────┘ ◄────────────────────────────► └──────────────────────────┘
-         ▲                                                        ▲
-         │ browser :8080                                          │ browser :6080
-         └──────────────── user ──────────────────────────────────┘
+         ▲
+         │ browser :8080  (chat + same-origin /novnc/ — mobile-friendly)
+         └──────────────── user
 ```
 
 - **Preferred pattern:** computer-use tools in the agent call a small **desktop-api** (FastAPI) *inside* the desktop container. That avoids fragile cross-container `DISPLAY` networking.
@@ -59,13 +59,15 @@ OPENAI_API_KEY=sk-or-v1-...
 OPENAI_BASE_URL=https://openrouter.ai/api/v1
 MODEL=meta-llama/llama-3.3-70b-instruct:free
 
-VNC_PASSWORD=choose-a-secret
+# Tryout default: no VNC password (INSECURE on the open internet)
+VNC_PASSWORD=
+VNC_NO_PASSWORD=1
 NOVNC_PUBLIC_URL=http://localhost:6080
 ```
 
 Free OpenRouter models and rate limits change over time. If the default is unavailable, pick another `:free` model from [openrouter.ai/models](https://openrouter.ai/models?q=free) and set `MODEL` accordingly.
 
-On a VPS, set `NOVNC_PUBLIC_URL` to `http://YOUR_IP:6080` (or your HTTPS reverse-proxy URL).
+On a VPS you mainly need port **8080** (chat + proxied noVNC at `/novnc/`). `NOVNC_PUBLIC_URL` is optional for a direct :6080 link; mobile carriers often block 6080.
 
 ### 3. Run chat + live desktop
 
@@ -76,15 +78,16 @@ docker compose up --build
 | Service | URL |
 |---|---|
 | Chat UI | http://localhost:8080 |
-| Live desktop (noVNC) | http://localhost:6080/vnc.html |
+| Live desktop (same-origin) | http://localhost:8080/novnc/vnc.html |
+| Live desktop (direct, optional) | http://localhost:6080/vnc.html |
 
 Health: `GET /health` · UI config: `GET /api/config`
 
 ### 4. Watch / take over the desktop
 
 1. Open the chat UI → **Computer** in the sidebar (or open noVNC fullscreen).
-2. When prompted, enter `VNC_PASSWORD`.
-3. Ask the agent to open a site or click around — you see it live and can click/type yourself in the same session (`x11vnc -shared`).
+2. Click **Connect** — with the tryout defaults there is **no password** (`VNC_NO_PASSWORD=1`).
+3. Ask the agent to open a site or click around — you see it live and can click/type yourself in the same session (`x11vnc -shared`). Screenshots also appear **inline in chat**.
 
 The desktop image runs a **polished lean XFCE** session: soft wallpaper, Greybird + Papirus theme, bottom panel with Browser / Terminal / Files launchers, Chromium, `xfce4-terminal`, and Thunar — meant to feel like a real computer view, not a blank X root.
 
@@ -100,15 +103,15 @@ The XFCE desktop image is heavier than a bare openbox setup (often ~1–1.5 GB
 
 ## Security (important)
 
-- **Do not expose port 6080 to the open internet without protection.** Prefer:
-  - firewall allowlist (e.g. `ufw allow from YOUR_IP to any port 6080`), and/or
-  - reverse proxy with TLS + basic auth / SSO in front of noVNC.
-- Set a strong `VNC_PASSWORD` (classic VNC uses up to 8 characters for the wire password).
+- **Open no-password VNC on the internet is insecure.** The defaults (`VNC_PASSWORD=` empty + `VNC_NO_PASSWORD=1`) are for a quick tryout only. Anyone who can reach the desktop stream can control it.
+- Prefer locking down for anything beyond a demo:
+  - set a `VNC_PASSWORD` and `VNC_NO_PASSWORD=0`, and/or
+  - firewall allowlist (e.g. `ufw allow from YOUR_IP to any port 8080`), and/or
+  - reverse proxy with TLS + basic auth / SSO in front of the agent.
+- Port **6080** is optional (direct noVNC). The UI embeds **same-origin `/novnc/`** on **8080** (HTTP + WebSocket reverse proxy) so phones work when carriers block 6080.
 - Desktop-api port **7090** is **not** published to the host — only reachable on the Compose network.
 - Never commit `.env` or tokens (see `.gitignore`).
 - File tools stay confined to `WORKSPACE_DIR`; shell boundary is the container.
-
-Same-origin note: the Computer view iframes `NOVNC_PUBLIC_URL`. If the chat UI and noVNC are on different hosts/ports, some browsers may restrict cookies/embedding — use **Open fullscreen** or put both behind one reverse proxy (e.g. nginx `/` → agent, `/desktop/` → noVNC). A full WebSocket-aware proxy is optional; documenting `:6080` is enough for most VPS setups.
 
 ## When to use which browser
 
@@ -134,7 +137,7 @@ Returns `novnc_public_url` and `novnc_embed_url` for the SPA (no secrets).
 ```
 nitc-agent/
   app/
-    main.py              # FastAPI: /health, /api/chat, /api/config, static UI
+    main.py              # FastAPI: /health, /api/chat, /api/config, /novnc/ proxy, /api/media, static UI
     agent.py             # tool-calling loop + system prompt
     config.py
     tools/               # shell, files, browser, github, computer

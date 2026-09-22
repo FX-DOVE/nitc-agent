@@ -12,6 +12,7 @@ services:
       - HOST=0.0.0.0
       - PORT=8080
       - DESKTOP_API_URL=http://desktop:7090
+      - NOVNC_UPSTREAM=http://desktop:6080
       - NOVNC_PUBLIC_URL=${NOVNC_PUBLIC_URL:-http://localhost:6080}
     volumes:
       - ./workspace:/app/workspace
@@ -30,12 +31,13 @@ services:
       dockerfile: Dockerfile.desktop
     container_name: nitc-desktop
     ports:
-      # noVNC web UI (password-protected via VNC_PASSWORD)
+      # Direct noVNC (optional; prefer same-origin /novnc/ via agent :8080)
       - "6080:6080"
       # desktop-api stays internal (7090) — not published
     environment:
       - DISPLAY=:99
-      - VNC_PASSWORD=${VNC_PASSWORD:-nitc}
+      - VNC_PASSWORD=${VNC_PASSWORD:-}
+      - VNC_NO_PASSWORD=${VNC_NO_PASSWORD:-1}
       - DESKTOP_WORKSPACE=/home/desktop/workspace
       - SCREEN_WIDTH=${SCREEN_WIDTH:-1280}
       - SCREEN_HEIGHT=${SCREEN_HEIGHT:-800}

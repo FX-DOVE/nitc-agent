@@ -29,7 +29,10 @@ class Settings(BaseSettings):
 
     # Phase 2 — interactive desktop
     desktop_api_url: str = "http://desktop:7090"
+    # Direct :6080 URL (optional fullscreen / legacy). Embed uses same-origin /novnc/.
     novnc_public_url: str = "http://localhost:6080"
+    # Upstream for the agent’s /novnc/ reverse proxy (Docker DNS).
+    novnc_upstream: str = "http://desktop:6080"
 
     @property
     def workspace_path(self) -> Path:

@@ -209,6 +209,16 @@
       font-size: 0.72rem; color: var(--muted);
       margin-top: 8px; font-family: var(--mono);
     }
+    .bubble-images {
+      display: flex; flex-direction: column; gap: 8px;
+      margin-top: 10px;
+    }
+    .bubble-images img {
+      max-width: 100%; border-radius: 8px;
+      border: 1px solid var(--border);
+      background: #05070b;
+    }
+
     .typing-dots span {
       display: inline-block; width: 6px; height: 6px;
       border-radius: 50%; background: var(--muted);
@@ -433,14 +443,15 @@
         <div class="desktop-stage">
           <div class="desktop-empty" id="desktop-empty">
             <h3>Live Linux desktop</h3>
-            <p>Connect to stream the XFCE session via noVNC. Enter <code>VNC_PASSWORD</code> when prompted.</p>
+            <p>Click Connect to stream the XFCE session via noVNC (same-origin on port 8080 — no password for tryout).</p>
             <button type="button" class="btn" id="novnc-connect-2">Connect desktop</button>
           </div>
           <iframe id="novnc-frame" title="Nitc desktop noVNC" allow="clipboard-read; clipboard-write"></iframe>
         </div>
         <div class="desktop-meta">
-          Firewall port <strong>6080</strong>. Set <code>NOVNC_PUBLIC_URL</code> on a VPS.
-          Prefer HTTPS + auth in production.
+          Desktop streams via same-origin <code>/novnc/</code> on port <strong>8080</strong>
+          (mobile-friendly; carriers often block raw :6080).
+          Open no-password VNC on the internet is insecure — tryout only; prefer HTTPS + auth in production.
         </div>
       </section>
     </main>
@@ -471,7 +482,12 @@
     }
     input.addEventListener("input", autoResize);
 
-    function appendMessage(role, content, extra) {
+    function stripMarkdownImages(text) {
+      // Keep caption text; images are rendered via the images[] array.
+      return String(text || "").replace(/!\[[^\]]*\]\((\/api\/media\/screenshots\/[^)]+)\)/g, "").trim();
+    }
+
+    function appendMessage(role, content, extra, images) {
       const row = document.createElement("div");
       row.className = "msg-row " + role;
 
@@ -487,7 +503,23 @@
       if (content === "__thinking__") {
         bubble.innerHTML = '<div class="typing-dots"><span></span><span></span><span></span></div>';
       } else {
-        bubble.textContent = content;
+        const display = Array.isArray(images) && images.length
+          ? stripMarkdownImages(content)
+          : content;
+        bubble.textContent = display;
+        if (Array.isArray(images) && images.length) {
+          const wrap = document.createElement("div");
+          wrap.className = "bubble-images";
+          images.forEach((src) => {
+            if (!src) return;
+            const img = document.createElement("img");
+            img.src = src;
+            img.alt = "screenshot";
+            img.loading = "lazy";
+            wrap.appendChild(img);
+          });
+          bubble.appendChild(wrap);
+        }
       }
       if (extra) {
         const badge = document.createElement("div");
@@ -556,14 +588,14 @@
     });
 
     async function loadConfig() {
+      const fallback = "/novnc/vnc.html?autoconnect=1&resize=scale&path=novnc/websockify";
       try {
         const r = await fetch("/api/config");
         const data = await r.json();
-        const pub = (data.novnc_public_url || "http://localhost:6080").replace(/\/$/, "");
-        novncEmbed = data.novnc_embed_url || (pub + "/vnc.html?autoconnect=1&resize=scale");
+        novncEmbed = data.novnc_embed_url || data.novnc_public_url || fallback;
         novncOpen.href = novncEmbed;
       } catch (e) {
-        novncEmbed = "http://localhost:6080/vnc.html?autoconnect=1&resize=scale";
+        novncEmbed = fallback;
         novncOpen.href = novncEmbed;
       }
     }
@@ -604,7 +636,8 @@
           appendMessage("assistant", data.detail || JSON.stringify(data));
         } else {
           const extra = data.tool_rounds ? `tool rounds: ${data.tool_rounds}` : null;
-          appendMessage("assistant", data.reply, extra);
+          const images = Array.isArray(data.images) ? data.images : [];
+          appendMessage("assistant", data.reply, extra, images);
           history.push({ role: "assistant", content: data.reply });
         }
       } catch (err) {
