@@ -342,20 +342,35 @@
     .attach-menu button:active { background: rgba(255,255,255,0.08); }
 
     /* Computer view */
-    .computer-view { background: var(--bg); padding: 0; gap: 0; }
+    .computer-view { background: var(--bg); padding: 0; gap: 0; position: relative; }
     .computer-view .topbar {
       position: absolute; top: 0; left: 0; right: 0; background: transparent;
-      z-index: 10; pointer-events: none;
+      z-index: 20; pointer-events: none;
     }
     .computer-view .topbar > * { pointer-events: auto; }
     .desktop-stage {
       flex: 1; min-height: 0; width: 100%; background: #000; overflow: hidden; position: relative;
+      touch-action: none;
+    }
+    .desktop-zoom-wrap {
+      position: absolute; inset: 0; transform-origin: 0 0; will-change: transform;
     }
     #novnc-frame {
       position: absolute; inset: 0; width: 100%; height: 100%; border: 0; background: #000; z-index: 1;
+      pointer-events: none; /* gestures handled by overlay */
     }
+    .gesture-layer {
+      position: absolute; inset: 0; z-index: 3; touch-action: none;
+      background: transparent; -webkit-user-select: none; user-select: none;
+    }
+    .trackpad-pointer {
+      position: absolute; z-index: 4; width: 22px; height: 22px; margin: -2px 0 0 -2px;
+      pointer-events: none; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.55));
+      transition: opacity .15s;
+    }
+    .trackpad-pointer.hidden { display: none; }
     .desktop-empty {
-      position: absolute; inset: 0; z-index: 2; display: flex; flex-direction: column;
+      position: absolute; inset: 0; z-index: 5; display: flex; flex-direction: column;
       align-items: center; justify-content: center; gap: 14px; color: var(--text);
       text-align: center; padding: 24px; background: #000;
     }
@@ -368,12 +383,143 @@
     }
     @keyframes spin { to { transform: rotate(360deg); } }
     .computer-bottom {
-      position: absolute; left: 0; right: 0; bottom: 0; z-index: 10;
+      position: absolute; left: 0; right: 0; bottom: 0; z-index: 20;
       display: flex; align-items: center; justify-content: space-between;
       padding: 12px 16px max(16px, var(--safe-bottom)); pointer-events: none;
       background: linear-gradient(to top, rgba(0,0,0,0.55), transparent);
     }
     .computer-bottom > * { pointer-events: auto; }
+    .computer-view.kb-open .computer-bottom {
+      padding-bottom: 12px;
+    }
+    #computer-kb-input {
+      position: fixed; left: -9999px; top: 0; width: 1px; height: 1px; opacity: 0;
+      border: 0; padding: 0; margin: 0; font-size: 16px; /* prevent iOS zoom */
+    }
+
+    /* Computer more menu */
+    .comp-more-menu {
+      position: absolute; top: calc(max(10px, var(--safe-top)) + 48px); right: 14px;
+      z-index: 30; min-width: 210px; padding: 6px 0;
+      background: #2c2c2e; border-radius: 14px;
+      box-shadow: 0 12px 40px rgba(0,0,0,0.55);
+      display: none; overflow: hidden;
+    }
+    .comp-more-menu.show { display: block; }
+    .comp-more-menu button {
+      display: flex; align-items: center; gap: 12px; width: 100%;
+      padding: 13px 16px; border: none; background: transparent;
+      color: var(--text); cursor: pointer; font-size: 0.98rem; text-align: left;
+    }
+    .comp-more-menu button:active { background: rgba(255,255,255,0.08); }
+    .comp-more-menu .mi { width: 22px; height: 22px; display: grid; place-items: center; color: var(--text); flex-shrink: 0; }
+    .comp-more-menu .check { margin-left: auto; width: 18px; color: var(--text); opacity: 0; }
+    .comp-more-menu button.on .check { opacity: 1; }
+
+    /* Clipboard popover */
+    .clip-popover {
+      position: absolute; left: 16px; bottom: calc(max(16px, var(--safe-bottom)) + 56px);
+      z-index: 30; min-width: 200px; padding: 6px 0;
+      background: #2c2c2e; border-radius: 14px;
+      box-shadow: 0 12px 40px rgba(0,0,0,0.55);
+      display: none; overflow: hidden;
+    }
+    .clip-popover.show { display: block; }
+    .clip-popover button {
+      display: flex; align-items: center; gap: 12px; width: 100%;
+      padding: 13px 16px; border: none; background: transparent;
+      color: var(--text); cursor: pointer; font-size: 0.98rem; text-align: left;
+    }
+    .clip-popover button:active { background: rgba(255,255,255,0.08); }
+    .clip-popover .mi { width: 22px; height: 22px; display: grid; place-items: center; flex-shrink: 0; }
+
+    .comp-menu-backdrop {
+      position: absolute; inset: 0; z-index: 25; background: transparent; display: none;
+    }
+    .comp-menu-backdrop.show { display: block; }
+
+    /* Using the Computer help sheet */
+    .help-sheet-backdrop {
+      position: absolute; inset: 0; z-index: 40;
+      background: rgba(0,0,0,0.55); display: none;
+      align-items: stretch; justify-content: center;
+      padding: calc(max(10px, var(--safe-top)) + 52px) 10px max(12px, var(--safe-bottom));
+    }
+    .help-sheet-backdrop.show { display: flex; }
+    .help-sheet {
+      width: 100%; max-width: 520px; background: #1c1c1e; border-radius: 22px;
+      overflow: hidden; display: flex; flex-direction: column; max-height: 100%;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.55);
+    }
+    .help-sheet-head {
+      display: flex; align-items: center; justify-content: center;
+      position: relative; padding: 16px 48px 12px; flex-shrink: 0;
+    }
+    .help-sheet-head h2 {
+      margin: 0; font-size: 1.15rem; font-weight: 700; letter-spacing: -0.02em;
+    }
+    .help-sheet-close {
+      position: absolute; left: 12px; top: 12px;
+      width: 36px; height: 36px; border-radius: 50%; border: none;
+      background: transparent; color: var(--text); cursor: pointer;
+      display: grid; place-items: center;
+    }
+    .help-sheet-body {
+      flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch;
+      padding: 4px 14px 20px;
+    }
+    .help-section-title {
+      margin: 14px 4px 8px; font-size: 0.78rem; font-weight: 600;
+      color: var(--muted); letter-spacing: 0.02em; text-transform: none;
+    }
+    .help-card {
+      background: #2c2c2e; border-radius: 16px; overflow: hidden; margin-bottom: 4px;
+    }
+    .help-row {
+      display: flex; gap: 14px; align-items: flex-start;
+      padding: 14px 14px; border-bottom: 1px solid rgba(255,255,255,0.06);
+    }
+    .help-row:last-child { border-bottom: none; }
+    .help-row .hi {
+      width: 28px; height: 28px; flex-shrink: 0; display: grid; place-items: center;
+      color: var(--text); margin-top: 1px;
+    }
+    .help-row .ht { font-weight: 650; font-size: 0.98rem; letter-spacing: -0.01em; margin: 0 0 3px; }
+    .help-row .hd { margin: 0; color: var(--text-secondary); font-size: 0.88rem; line-height: 1.35; }
+
+    /* Clipboard fallback modals */
+    .clip-fallback-backdrop {
+      position: fixed; inset: 0; z-index: 70; background: rgba(0,0,0,0.6);
+      display: none; align-items: center; justify-content: center; padding: 24px;
+    }
+    .clip-fallback-backdrop.show { display: flex; }
+    .clip-fallback-card {
+      width: 100%; max-width: 360px; background: #1c1c1e; border-radius: 18px;
+      padding: 20px; box-shadow: 0 16px 48px rgba(0,0,0,0.5);
+    }
+    .clip-fallback-card h3 { margin: 0 0 8px; font-size: 1.05rem; }
+    .clip-fallback-card p { margin: 0 0 12px; color: var(--text-secondary); font-size: 0.88rem; }
+    .clip-fallback-card textarea {
+      width: 100%; min-height: 110px; background: #2c2c2e; border: 1px solid #3a3a3c;
+      border-radius: 12px; padding: 12px 14px; outline: none; font-size: 16px;
+      color: var(--text); resize: vertical;
+    }
+    .clip-fallback-card .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+    .clip-fallback-card .modal-actions button {
+      border: none; border-radius: 999px; padding: 8px 16px; cursor: pointer;
+      background: #2c2c2e; color: var(--text); font-weight: 600;
+    }
+    .clip-fallback-card .modal-actions .primary { background: #fff; color: #000; }
+
+    .toast-msg {
+      position: absolute; left: 50%; bottom: calc(max(16px, var(--safe-bottom)) + 72px);
+      transform: translateX(-50%); z-index: 35;
+      background: rgba(44,44,46,0.95); color: var(--text); padding: 10px 16px;
+      border-radius: 12px; font-size: 0.88rem; pointer-events: none;
+      opacity: 0; transition: opacity .2s; max-width: 85%; text-align: center;
+    }
+    .toast-msg.show { opacity: 1; }
+
     .sr-only {
       position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
       overflow: hidden; clip: rect(0,0,0,0); border: 0;
@@ -534,7 +680,7 @@
                 <path d="M9.1 9a3 3 0 1 1 4.4 2.7c-.8.4-1.5 1-1.5 2M12 17h.01"/>
               </svg>
             </button>
-            <button type="button" class="icon-btn" id="novnc-reload" aria-label="More" title="Reload">
+            <button type="button" class="icon-btn" id="novnc-more" aria-label="More" title="More">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
                 <circle cx="6" cy="12" r="1.6"/>
                 <circle cx="12" cy="12" r="1.6"/>
@@ -544,34 +690,132 @@
           </div>
         </header>
 
-        <div class="desktop-stage">
+        <div class="desktop-stage" id="desktop-stage">
+          <div class="desktop-zoom-wrap" id="desktop-zoom-wrap">
+            <iframe id="novnc-frame" title="Animal Nitc desktop noVNC" allow="clipboard-read; clipboard-write"></iframe>
+            <div class="gesture-layer" id="gesture-layer" aria-hidden="true"></div>
+            <svg class="trackpad-pointer hidden" id="trackpad-pointer" viewBox="0 0 24 24" aria-hidden="true">
+              <path fill="#fff" stroke="#111" stroke-width="1.2" d="M5 3l12 8.2-5.4 1.3 3.4 7.2-2.6 1.2-3.5-7.3L5 17.5V3z"/>
+            </svg>
+          </div>
           <div class="desktop-empty" id="desktop-empty">
             <div class="spinner" aria-hidden="true"></div>
             <p class="connecting-label">Connecting...</p>
             <button type="button" class="sr-only" id="novnc-connect">Connect</button>
             <button type="button" class="sr-only" id="novnc-connect-2">Connect desktop</button>
           </div>
-          <iframe id="novnc-frame" title="Animal Nitc desktop noVNC" allow="clipboard-read; clipboard-write"></iframe>
+          <div class="toast-msg" id="comp-toast" role="status"></div>
         </div>
 
         <div class="computer-bottom">
-          <button type="button" class="icon-btn" id="novnc-clipboard" aria-label="Clipboard" title="Open fullscreen">
+          <button type="button" class="icon-btn" id="novnc-clipboard" aria-label="Clipboard" title="Clipboard">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
               <rect x="8" y="3" width="8" height="4" rx="1"/>
               <path d="M8 5H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/>
               <path d="M9 12h6M9 16h4"/>
             </svg>
           </button>
-          <a class="icon-btn" id="novnc-open" href="#" target="_blank" rel="noopener" aria-label="Keyboard / fullscreen" title="Fullscreen">
+          <button type="button" class="icon-btn" id="novnc-keyboard" aria-label="Keyboard" title="Keyboard">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-              <rect x="3" y="7" width="18" height="12" rx="2"/>
-              <circle cx="7" cy="13" r="0.9" fill="currentColor"/>
-              <circle cx="10" cy="13" r="0.9" fill="currentColor"/>
-              <circle cx="13" cy="13" r="0.9" fill="currentColor"/>
-              <circle cx="16" cy="13" r="0.9" fill="currentColor"/>
+              <rect x="2" y="6" width="20" height="13" rx="2"/>
+              <path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M6 14h.01M10 14h4M18 14h.01"/>
             </svg>
-          </a>
+          </button>
         </div>
+
+        <div class="comp-menu-backdrop" id="comp-menu-backdrop"></div>
+
+        <div class="comp-more-menu" id="comp-more-menu" role="menu">
+          <button type="button" id="btn-trackpad-toggle" role="menuitem">
+            <span class="mi"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 4l10 7-4.2 1 2.8 5.8-2.1.9L8.6 13 5 16V4z"/></svg></span>
+            Trackpad mode
+            <span class="check"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M5 12l5 5L20 7"/></svg></span>
+          </button>
+          <button type="button" id="btn-recenter-pointer" role="menuitem">
+            <span class="mi"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/></svg></span>
+            Recenter pointer
+          </button>
+          <button type="button" id="btn-im-done" role="menuitem">
+            <span class="mi"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 14l-5-5 5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/></svg></span>
+            I'm done
+          </button>
+        </div>
+
+        <div class="clip-popover" id="clip-popover" role="menu">
+          <button type="button" id="btn-paste-from-phone" role="menuitem">
+            <span class="mi"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="8" y="3" width="8" height="4" rx="1"/><path d="M8 5H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><path d="M12 10v7M9 14l3 3 3-3"/></svg></span>
+            Paste from Phone
+          </button>
+          <button type="button" id="btn-copy-to-phone" role="menuitem">
+            <span class="mi"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="8" y="3" width="8" height="4" rx="1"/><path d="M8 5H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><path d="M12 17v-7M9 13l3-3 3 3"/></svg></span>
+            Copy to Phone
+          </button>
+        </div>
+
+        <div class="help-sheet-backdrop" id="help-sheet-backdrop">
+          <div class="help-sheet" role="dialog" aria-labelledby="help-sheet-title">
+            <div class="help-sheet-head">
+              <button type="button" class="help-sheet-close" id="help-sheet-close" aria-label="Close">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M6 6l12 12M18 6L6 18"/></svg>
+              </button>
+              <h2 id="help-sheet-title">Using the Computer</h2>
+            </div>
+            <div class="help-sheet-body">
+              <div class="help-section-title">Moving Around</div>
+              <div class="help-card">
+                <div class="help-row">
+                  <span class="hi"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M8 5c0-1.5 1.2-3 3-3s3 1.5 3 3v6"/><path d="M8 9v4c0 3.3 2.7 6 6 6h0c1.2 0 2.3-.4 3.2-1"/><path d="M5 12v2a7 7 0 0 0 12 4"/></svg></span>
+                  <div><p class="ht">Scroll</p><p class="hd">Drag with two fingers.</p></div>
+                </div>
+                <div class="help-row">
+                  <span class="hi"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M9 11V6a2 2 0 1 1 4 0v5"/><path d="M13 10V5a2 2 0 1 1 4 0v7"/><path d="M9 13v-1a2 2 0 1 0-4 0v3a7 7 0 0 0 14 0v-3a2 2 0 1 0-4 0"/></svg></span>
+                  <div><p class="ht">Click and Drag</p><p class="hd">Tap to click. Drag with one finger.</p></div>
+                </div>
+                <div class="help-row">
+                  <span class="hi"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M8 7h8M8 12h8M8 17h5"/><circle cx="5" cy="7" r="1" fill="currentColor"/><circle cx="5" cy="12" r="1" fill="currentColor"/><circle cx="5" cy="17" r="1" fill="currentColor"/></svg></span>
+                  <div><p class="ht">Right-Click</p><p class="hd">Tap with two fingers, or press and hold.</p></div>
+                </div>
+                <div class="help-row">
+                  <span class="hi"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5M11 8v6M8 11h6"/></svg></span>
+                  <div><p class="ht">Zoom In</p><p class="hd">Pinch to zoom. Zoomed in, two fingers pan instead of scrolling.</p></div>
+                </div>
+              </div>
+
+              <div class="help-section-title">Typing and the Clipboard</div>
+              <div class="help-card">
+                <div class="help-row">
+                  <span class="hi"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="2" y="6" width="20" height="13" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M6 14h.01M10 14h4"/></svg></span>
+                  <div><p class="ht">Type</p><p class="hd">Tap the keyboard button in the bottom bar.</p></div>
+                </div>
+                <div class="help-row">
+                  <span class="hi"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="8" y="3" width="8" height="4" rx="1"/><path d="M8 5H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/></svg></span>
+                  <div><p class="ht">Copy and Paste</p><p class="hd">Tap the clipboard button in the bottom bar for Copy to Phone and Paste from Phone.</p></div>
+                </div>
+              </div>
+
+              <div class="help-section-title">When a Pointer Is Easier</div>
+              <div class="help-card">
+                <div class="help-row">
+                  <span class="hi"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="4" y="6" width="16" height="12" rx="2"/><path d="M8 14h8"/></svg></span>
+                  <div><p class="ht">Trackpad Mode</p><p class="hd">Turn on from the ... menu. Your finger moves the pointer; tap to click there, double-tap and hold to drag. Recenter pointer if it drifts.</p></div>
+                </div>
+              </div>
+
+              <div class="help-section-title">Handing It Back</div>
+              <div class="help-card">
+                <div class="help-row">
+                  <span class="hi"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M9 14l-5-5 5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/></svg></span>
+                  <div><p class="ht">I'm Done</p><p class="hd">Tap I'm done / continue when the Bot is waiting — going back does the same.</p></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <input type="text" id="computer-kb-input" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" inputmode="text" aria-hidden="true" tabindex="-1" />
+        <!-- keep hidden fullscreen link for compatibility -->
+        <a class="sr-only" id="novnc-open" href="#" target="_blank" rel="noopener">Open</a>
+        <button type="button" class="sr-only" id="novnc-reload">Reload</button>
       </section>
     </main>
   </div>
@@ -583,6 +827,30 @@
       <div class="modal-actions">
         <button type="button" id="name-modal-cancel">Cancel</button>
         <button type="button" class="primary" id="name-modal-ok">Create</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="clip-fallback-backdrop" id="paste-fallback">
+    <div class="clip-fallback-card">
+      <h3>Paste here</h3>
+      <p>Clipboard access needs a secure context. Paste or type text below to send to the desktop.</p>
+      <textarea id="paste-fallback-text" placeholder="Paste text…"></textarea>
+      <div class="modal-actions">
+        <button type="button" id="paste-fallback-cancel">Cancel</button>
+        <button type="button" class="primary" id="paste-fallback-ok">Send</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="clip-fallback-backdrop" id="copy-fallback">
+    <div class="clip-fallback-card">
+      <h3>Copy to Phone</h3>
+      <p>Select and copy the remote clipboard text below.</p>
+      <textarea id="copy-fallback-text" readonly></textarea>
+      <div class="modal-actions">
+        <button type="button" id="copy-fallback-close">Close</button>
+        <button type="button" class="primary" id="copy-fallback-select">Select all</button>
       </div>
     </div>
   </div>
@@ -607,6 +875,12 @@
     const novncOpen = document.getElementById("novnc-open");
     const novncReload = document.getElementById("novnc-reload");
     const desktopEmpty = document.getElementById("desktop-empty");
+    const desktopStage = document.getElementById("desktop-stage");
+    const desktopZoomWrap = document.getElementById("desktop-zoom-wrap");
+    const gestureLayer = document.getElementById("gesture-layer");
+    const trackpadPointer = document.getElementById("trackpad-pointer");
+    const computerKbInput = document.getElementById("computer-kb-input");
+    const viewComputer = document.getElementById("view-computer");
     const sidebar = document.getElementById("sidebar");
     const backdrop = document.getElementById("backdrop");
     const workingRow = document.getElementById("working-row");
@@ -627,6 +901,17 @@
     let computerLoaded = false;
     let sending = false;
     let modalMode = "bot"; // bot | group
+    let screenW = 1280;
+    let screenH = 800;
+    let trackpadMode = false;
+    try { trackpadMode = sessionStorage.getItem("nitc_trackpad") === "1"; } catch (_) {}
+    let pointerX = 0.5; // normalized 0..1 within content box
+    let pointerY = 0.5;
+    let viewScale = 1;
+    let viewPanX = 0;
+    let viewPanY = 0;
+    let kbOpen = false;
+    let lastRemoteClipboard = "";
 
     // Speech / recording
     let recognition = null;
@@ -970,9 +1255,17 @@
       closeSidebar();
       closeAttachMenu();
       closeBotsMenu();
+      closeCompMenus();
+      if (name !== "computer") {
+        closeKeyboard();
+        closeHelpSheet();
+      }
       if (name === "computer") {
         if (!computerLoaded) desktopEmpty.classList.remove("hidden");
         if (novncEmbed) setTimeout(() => connectDesktop(), computerLoaded ? 0 : 400);
+        refreshDesktopHealth();
+        applyTrackpadUI();
+        applyZoomTransform();
       }
       if (name === "bots") renderBotsList();
     }
@@ -984,6 +1277,713 @@
       const hide = () => desktopEmpty.classList.add("hidden");
       novncFrame.addEventListener("load", hide, { once: true });
       setTimeout(hide, 2500);
+    }
+
+    /* —— Computer chrome: gestures, trackpad, clipboard, keyboard —— */
+    function showCompToast(msg) {
+      const el = document.getElementById("comp-toast");
+      if (!el) return;
+      el.textContent = msg;
+      el.classList.add("show");
+      clearTimeout(showCompToast._t);
+      showCompToast._t = setTimeout(() => el.classList.remove("show"), 2200);
+    }
+
+    function closeCompMenus() {
+      document.getElementById("comp-more-menu")?.classList.remove("show");
+      document.getElementById("clip-popover")?.classList.remove("show");
+      document.getElementById("comp-menu-backdrop")?.classList.remove("show");
+    }
+
+    function openHelpSheet() {
+      closeCompMenus();
+      document.getElementById("help-sheet-backdrop")?.classList.add("show");
+    }
+    function closeHelpSheet() {
+      document.getElementById("help-sheet-backdrop")?.classList.remove("show");
+    }
+
+    function applyTrackpadUI() {
+      const btn = document.getElementById("btn-trackpad-toggle");
+      if (btn) btn.classList.toggle("on", !!trackpadMode);
+      if (trackpadPointer) {
+        trackpadPointer.classList.toggle("hidden", !trackpadMode);
+        if (trackpadMode) placePointerOverlay();
+      }
+    }
+
+    function setTrackpadMode(on) {
+      trackpadMode = !!on;
+      try { sessionStorage.setItem("nitc_trackpad", trackpadMode ? "1" : "0"); } catch (_) {}
+      applyTrackpadUI();
+      if (trackpadMode) {
+        recenterPointer();
+        showCompToast("Trackpad mode on");
+      } else {
+        showCompToast("Trackpad mode off");
+      }
+    }
+
+    function contentBox() {
+      // Letterboxed content rect inside the stage (object-fit: contain equivalent)
+      const stage = desktopStage.getBoundingClientRect();
+      const aspect = screenW / screenH;
+      const stageAspect = stage.width / Math.max(1, stage.height);
+      let w, h, left, top;
+      if (stageAspect > aspect) {
+        h = stage.height;
+        w = h * aspect;
+        left = (stage.width - w) / 2;
+        top = 0;
+      } else {
+        w = stage.width;
+        h = w / aspect;
+        left = 0;
+        top = (stage.height - h) / 2;
+      }
+      return { stage, left, top, w, h, aspect };
+    }
+
+    function clientToDesktop(clientX, clientY) {
+      const box = contentBox();
+      // Account for CSS zoom/pan on wrap: inverse transform
+      const sx = (clientX - box.stage.left - viewPanX) / viewScale;
+      const sy = (clientY - box.stage.top - viewPanY) / viewScale;
+      const nx = (sx - box.left) / Math.max(1, box.w);
+      const ny = (sy - box.top) / Math.max(1, box.h);
+      const x = Math.round(Math.min(1, Math.max(0, nx)) * (screenW - 1));
+      const y = Math.round(Math.min(1, Math.max(0, ny)) * (screenH - 1));
+      return { x, y, nx: Math.min(1, Math.max(0, nx)), ny: Math.min(1, Math.max(0, ny)) };
+    }
+
+    function placePointerOverlay() {
+      if (!trackpadPointer || !trackpadMode) return;
+      const box = contentBox();
+      const px = box.left * viewScale + viewPanX + pointerX * box.w * viewScale;
+      const py = box.top * viewScale + viewPanY + pointerY * box.h * viewScale;
+      trackpadPointer.style.left = px + "px";
+      trackpadPointer.style.top = py + "px";
+    }
+
+    function recenterPointer() {
+      pointerX = 0.5;
+      pointerY = 0.5;
+      placePointerOverlay();
+      const x = Math.round(pointerX * (screenW - 1));
+      const y = Math.round(pointerY * (screenH - 1));
+      desktopMouse(x, y, "move");
+    }
+
+    function applyZoomTransform() {
+      if (!desktopZoomWrap) return;
+      desktopZoomWrap.style.transform = `translate(${viewPanX}px, ${viewPanY}px) scale(${viewScale})`;
+      placePointerOverlay();
+    }
+
+    function clampPan() {
+      const stage = desktopStage.getBoundingClientRect();
+      const maxX = stage.width * (viewScale - 1);
+      const maxY = stage.height * (viewScale - 1);
+      viewPanX = Math.min(0, Math.max(-maxX, viewPanX));
+      viewPanY = Math.min(0, Math.max(-maxY, viewPanY));
+    }
+
+    async function desktopFetch(path, opts) {
+      const r = await fetch("/api/desktop/" + path.replace(/^\//, ""), opts);
+      let data = null;
+      try { data = await r.json(); } catch (_) { data = { ok: r.ok, status: r.status }; }
+      if (!r.ok) throw new Error((data && (data.detail || data.error)) || ("HTTP " + r.status));
+      return data;
+    }
+
+    async function refreshDesktopHealth() {
+      try {
+        const data = await desktopFetch("health");
+        if (data.screen && data.screen.width) {
+          screenW = data.screen.width;
+          screenH = data.screen.height;
+        }
+      } catch (_) {}
+    }
+
+    let mouseQueue = Promise.resolve();
+    function desktopMouse(x, y, action, button) {
+      const body = { x, y, action: action || "move", button: button || 1 };
+      mouseQueue = mouseQueue.then(() =>
+        desktopFetch("mouse", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        }).catch(() => null)
+      ).catch(() => null);
+      return mouseQueue;
+    }
+
+    async function desktopType(text, key) {
+      const payload = {};
+      if (text) payload.text = text;
+      if (key) payload.key = key;
+      return desktopFetch("type", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+    }
+
+    async function desktopHotkey(keys) {
+      return desktopFetch("hotkey", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ keys }),
+      });
+    }
+
+    async function desktopScroll(x, y, direction, amount) {
+      return desktopFetch("scroll", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ x, y, direction, amount: amount || 3 }),
+      });
+    }
+
+    async function sendTextToRemote(text) {
+      if (!text) return;
+      // Set remote clipboard then Ctrl+V for reliability with unicode; also type ASCII fallback
+      try {
+        await desktopFetch("clipboard", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text }),
+        });
+        await desktopHotkey(["ctrl", "v"]);
+        showCompToast("Pasted to desktop");
+      } catch (e) {
+        try {
+          await desktopType(text);
+          showCompToast("Typed on desktop");
+        } catch (e2) {
+          showCompToast("Paste failed");
+        }
+      }
+    }
+
+    function openPasteFallback() {
+      const bd = document.getElementById("paste-fallback");
+      const ta = document.getElementById("paste-fallback-text");
+      if (ta) ta.value = "";
+      bd?.classList.add("show");
+      setTimeout(() => ta?.focus(), 50);
+    }
+
+    function openCopyFallback(text) {
+      const bd = document.getElementById("copy-fallback");
+      const ta = document.getElementById("copy-fallback-text");
+      if (ta) ta.value = text || "";
+      bd?.classList.add("show");
+      setTimeout(() => {
+        if (ta) { ta.focus(); ta.select(); }
+      }, 50);
+    }
+
+    async function pasteFromPhone() {
+      closeCompMenus();
+      let text = "";
+      try {
+        if (navigator.clipboard && window.isSecureContext) {
+          text = await navigator.clipboard.readText();
+        } else {
+          throw new Error("insecure");
+        }
+      } catch (_) {
+        openPasteFallback();
+        return;
+      }
+      if (!text) {
+        openPasteFallback();
+        return;
+      }
+      await sendTextToRemote(text);
+    }
+
+    async function copyToPhone() {
+      closeCompMenus();
+      let text = "";
+      try {
+        const data = await desktopFetch("clipboard");
+        text = (data && data.text) || "";
+        lastRemoteClipboard = text;
+      } catch (_) {
+        text = lastRemoteClipboard || "";
+      }
+      if (!text) {
+        showCompToast("Remote clipboard empty");
+        openCopyFallback("");
+        return;
+      }
+      try {
+        if (navigator.clipboard && window.isSecureContext) {
+          await navigator.clipboard.writeText(text);
+          showCompToast("Copied to phone");
+          return;
+        }
+        throw new Error("insecure");
+      } catch (_) {
+        openCopyFallback(text);
+      }
+    }
+
+    function openKeyboard() {
+      kbOpen = true;
+      viewComputer?.classList.add("kb-open");
+      if (computerKbInput) {
+        computerKbInput.value = "";
+        computerKbInput.focus({ preventScroll: true });
+      }
+    }
+    function closeKeyboard() {
+      kbOpen = false;
+      viewComputer?.classList.remove("kb-open");
+      computerKbInput?.blur();
+    }
+    function toggleKeyboard() {
+      if (kbOpen && document.activeElement === computerKbInput) closeKeyboard();
+      else openKeyboard();
+    }
+
+    const KEY_MAP = {
+      Backspace: "BackSpace",
+      Enter: "Return",
+      Tab: "Tab",
+      Escape: "Escape",
+      ArrowLeft: "Left",
+      ArrowRight: "Right",
+      ArrowUp: "Up",
+      ArrowDown: "Down",
+      Delete: "Delete",
+      Home: "Home",
+      End: "End",
+      PageUp: "Page_Up",
+      PageDown: "Page_Down",
+    };
+
+    function wireComputerKeyboard() {
+      if (!computerKbInput || computerKbInput._wired) return;
+      computerKbInput._wired = true;
+      computerKbInput.addEventListener("keydown", (e) => {
+        const mapped = KEY_MAP[e.key];
+        if (mapped) {
+          e.preventDefault();
+          desktopHotkey([mapped]).catch(() => {});
+          return;
+        }
+        if (e.key === "c" && (e.ctrlKey || e.metaKey)) return;
+        if (e.ctrlKey || e.metaKey || e.altKey) {
+          // optional: forward common combos
+          if (e.key.length === 1) {
+            e.preventDefault();
+            const keys = [];
+            if (e.ctrlKey || e.metaKey) keys.push("ctrl");
+            if (e.altKey) keys.push("alt");
+            if (e.shiftKey) keys.push("shift");
+            keys.push(e.key.toLowerCase());
+            desktopHotkey(keys).catch(() => {});
+          }
+        }
+      });
+      computerKbInput.addEventListener("input", () => {
+        const v = computerKbInput.value;
+        if (!v) return;
+        computerKbInput.value = "";
+        desktopType(v).catch(() => {});
+      });
+      computerKbInput.addEventListener("blur", () => {
+        // Keep flag; user may switch apps. Treat as closed after short delay if still blurred.
+        setTimeout(() => {
+          if (document.activeElement !== computerKbInput) {
+            kbOpen = false;
+            viewComputer?.classList.remove("kb-open");
+          }
+        }, 100);
+      });
+    }
+
+    /* Gesture state */
+    const G = {
+      mode: null, // tap | drag | scroll | pinch | longpress | trackpad-move | trackpad-drag
+      startT: 0,
+      startX: 0,
+      startY: 0,
+      lastX: 0,
+      lastY: 0,
+      moved: false,
+      dragging: false,
+      longTimer: null,
+      lastTapT: 0,
+      pinchStartDist: 0,
+      pinchStartScale: 1,
+      panStartX: 0,
+      panStartY: 0,
+      scrollAcc: 0,
+    };
+
+    function clearLong() {
+      if (G.longTimer) { clearTimeout(G.longTimer); G.longTimer = null; }
+    }
+
+    function dist(a, b) {
+      const dx = a.clientX - b.clientX;
+      const dy = a.clientY - b.clientY;
+      return Math.hypot(dx, dy);
+    }
+
+    function mid(a, b) {
+      return { x: (a.clientX + b.clientX) / 2, y: (a.clientY + b.clientY) / 2 };
+    }
+
+    function wireGestures() {
+      if (!gestureLayer || gestureLayer._wired) return;
+      gestureLayer._wired = true;
+
+      gestureLayer.addEventListener("contextmenu", (e) => e.preventDefault());
+
+      gestureLayer.addEventListener("touchstart", (e) => {
+        if (e.touches.length === 1) {
+          const t = e.touches[0];
+          G.startT = Date.now();
+          G.startX = G.lastX = t.clientX;
+          G.startY = G.lastY = t.clientY;
+          G.moved = false;
+          G.dragging = false;
+          clearLong();
+          if (trackpadMode) {
+            const now = Date.now();
+            if (now - G.lastTapT < 320) {
+              // potential double-tap-hold drag
+              G.mode = "trackpad-drag-arm";
+            } else {
+              G.mode = "trackpad-move";
+            }
+          } else {
+            G.mode = "pending";
+            G.longTimer = setTimeout(() => {
+              // long-press → right click
+              const p = clientToDesktop(G.startX, G.startY);
+              desktopMouse(p.x, p.y, "click", 3);
+              G.mode = "longpress";
+              showCompToast("Right-click");
+            }, 520);
+          }
+        } else if (e.touches.length === 2) {
+          clearLong();
+          const d = dist(e.touches[0], e.touches[1]);
+          G.pinchStartDist = d;
+          G.pinchStartScale = viewScale;
+          G.panStartX = viewPanX;
+          G.panStartY = viewPanY;
+          G.mode = viewScale > 1.02 ? "pinch-or-pan" : "pinch-or-scroll";
+          G.scrollAcc = 0;
+          G.startT = Date.now();
+          G.moved = false;
+          const m = mid(e.touches[0], e.touches[1]);
+          G.startX = G.lastX = m.x;
+          G.startY = G.lastY = m.y;
+        }
+      }, { passive: true });
+
+      gestureLayer.addEventListener("touchmove", (e) => {
+        e.preventDefault();
+        if (e.touches.length === 1) {
+          const t = e.touches[0];
+          const dx = t.clientX - G.startX;
+          const dy = t.clientY - G.startY;
+          if (Math.hypot(dx, dy) > 8) {
+            G.moved = true;
+            clearLong();
+          }
+          if (trackpadMode) {
+            if (G.mode === "trackpad-drag-arm" && G.moved) {
+              G.mode = "trackpad-drag";
+              const x = Math.round(pointerX * (screenW - 1));
+              const y = Math.round(pointerY * (screenH - 1));
+              desktopMouse(x, y, "down", 1);
+              G.dragging = true;
+            }
+            // move pointer by finger delta relative to content size
+            const box = contentBox();
+            const sens = 1.15;
+            pointerX = Math.min(1, Math.max(0, pointerX + (t.clientX - G.lastX) / Math.max(1, box.w * viewScale) * sens));
+            pointerY = Math.min(1, Math.max(0, pointerY + (t.clientY - G.lastY) / Math.max(1, box.h * viewScale) * sens));
+            placePointerOverlay();
+            const x = Math.round(pointerX * (screenW - 1));
+            const y = Math.round(pointerY * (screenH - 1));
+            desktopMouse(x, y, G.dragging ? "move" : "move", 1);
+          } else {
+            if (G.mode === "pending" && G.moved) {
+              G.mode = "drag";
+              const p = clientToDesktop(G.startX, G.startY);
+              desktopMouse(p.x, p.y, "down", 1);
+              G.dragging = true;
+            }
+            if (G.mode === "drag") {
+              const p = clientToDesktop(t.clientX, t.clientY);
+              desktopMouse(p.x, p.y, "move", 1);
+            }
+          }
+          G.lastX = t.clientX;
+          G.lastY = t.clientY;
+        } else if (e.touches.length >= 2) {
+          clearLong();
+          const d = dist(e.touches[0], e.touches[1]);
+          const m = mid(e.touches[0], e.touches[1]);
+          const dx = m.x - G.startX;
+          const dy = m.y - G.startY;
+          const pinchDelta = Math.abs(d - G.pinchStartDist);
+          if (pinchDelta > 18 || G.mode === "pinch") {
+            G.mode = "pinch";
+            G.moved = true;
+            viewScale = Math.min(3.5, Math.max(1, G.pinchStartScale * (d / Math.max(1, G.pinchStartDist))));
+            // pan toward midpoint
+            const stage = desktopStage.getBoundingClientRect();
+            const cx = m.x - stage.left;
+            const cy = m.y - stage.top;
+            // keep simple: scale around center + finger pan
+            viewPanX = G.panStartX + dx;
+            viewPanY = G.panStartY + dy;
+            clampPan();
+            applyZoomTransform();
+          } else if (viewScale > 1.02) {
+            G.mode = "pan";
+            G.moved = true;
+            viewPanX = G.panStartX + dx;
+            viewPanY = G.panStartY + dy;
+            clampPan();
+            applyZoomTransform();
+          } else {
+            // two-finger scroll
+            G.mode = "scroll";
+            G.moved = true;
+            const sdy = m.y - G.lastY;
+            G.scrollAcc += sdy;
+            if (Math.abs(G.scrollAcc) > 24) {
+              const p = clientToDesktop(m.x, m.y);
+              const dir = G.scrollAcc > 0 ? "up" : "down";
+              const amt = Math.min(8, Math.max(1, Math.round(Math.abs(G.scrollAcc) / 24)));
+              desktopScroll(p.x, p.y, dir, amt).catch(() => {});
+              G.scrollAcc = 0;
+            }
+          }
+          G.lastX = m.x;
+          G.lastY = m.y;
+        }
+      }, { passive: false });
+
+      gestureLayer.addEventListener("touchend", (e) => {
+        clearLong();
+        if (e.touches.length === 0) {
+          const dur = Date.now() - G.startT;
+          if (trackpadMode) {
+            if (G.dragging) {
+              const x = Math.round(pointerX * (screenW - 1));
+              const y = Math.round(pointerY * (screenH - 1));
+              desktopMouse(x, y, "up", 1);
+            } else if (!G.moved && dur < 350 && (G.mode === "trackpad-move" || G.mode === "trackpad-drag-arm")) {
+              const x = Math.round(pointerX * (screenW - 1));
+              const y = Math.round(pointerY * (screenH - 1));
+              desktopMouse(x, y, "click", 1);
+              G.lastTapT = Date.now();
+            } else if (!G.moved && G.mode === "trackpad-drag-arm") {
+              // double-tap without hold → second click
+              const x = Math.round(pointerX * (screenW - 1));
+              const y = Math.round(pointerY * (screenH - 1));
+              desktopMouse(x, y, "click", 1);
+              G.lastTapT = Date.now();
+            }
+          } else {
+            if (G.dragging) {
+              const p = clientToDesktop(G.lastX, G.lastY);
+              desktopMouse(p.x, p.y, "up", 1);
+            } else if (G.mode === "pending" && !G.moved && dur < 500) {
+              // single tap click OR two-finger tap handled below
+              if (e.changedTouches.length === 1) {
+                const p = clientToDesktop(G.startX, G.startY);
+                desktopMouse(p.x, p.y, "click", 1);
+              }
+            } else if (G.mode === "pinch-or-scroll" || G.mode === "pinch-or-pan") {
+              // two-finger tap → right click
+              if (!G.moved && dur < 350) {
+                const p = clientToDesktop(G.startX, G.startY);
+                desktopMouse(p.x, p.y, "click", 3);
+              }
+            }
+          }
+          G.mode = null;
+          G.dragging = false;
+        }
+      });
+
+      // Mouse support for desktop browsers testing
+      gestureLayer.addEventListener("mousedown", (e) => {
+        if (e.button !== 0) return;
+        const p = clientToDesktop(e.clientX, e.clientY);
+        if (trackpadMode) {
+          pointerX = p.nx; pointerY = p.ny; placePointerOverlay();
+          desktopMouse(p.x, p.y, "click", 1);
+        } else {
+          desktopMouse(p.x, p.y, "down", 1);
+          G.dragging = true;
+          const move = (ev) => {
+            const q = clientToDesktop(ev.clientX, ev.clientY);
+            desktopMouse(q.x, q.y, "move", 1);
+          };
+          const up = (ev) => {
+            const q = clientToDesktop(ev.clientX, ev.clientY);
+            desktopMouse(q.x, q.y, "up", 1);
+            window.removeEventListener("mousemove", move);
+            window.removeEventListener("mouseup", up);
+            G.dragging = false;
+          };
+          window.addEventListener("mousemove", move);
+          window.addEventListener("mouseup", up);
+        }
+      });
+    }
+
+    async function handBackDone() {
+      closeCompMenus();
+      closeHelpSheet();
+      closeKeyboard();
+      // Navigate back and send resume token if not already sending
+      setView("chat");
+      if (sending) return;
+      const text = "done";
+      appendTimestampIfNeeded();
+      appendMessage("user", text);
+      history.push({ role: "user", content: text });
+      persistActiveChat();
+      sending = true;
+      sendBtn.disabled = true;
+      setWorking(true);
+      const thinking = appendMessage("assistant", "__thinking__");
+      try {
+        const apiMessages = history.map((m) => ({
+          role: m.role,
+          content: typeof m.content === "string" ? m.content : String(m.content || ""),
+        }));
+        const r = await fetch("/api/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ messages: apiMessages, attachments: [] }),
+        });
+        const data = await r.json().catch(() => ({}));
+        thinking.remove();
+        if (!r.ok) {
+          appendMessage("system", (data && data.detail) || ("Error " + r.status));
+        } else {
+          const reply = data.reply || "";
+          appendMessage("assistant", reply, data.images || null);
+          history.push({ role: "assistant", content: reply });
+          persistActiveChat();
+        }
+      } catch (err) {
+        thinking.remove();
+        appendMessage("system", String(err && err.message || err));
+      } finally {
+        sending = false;
+        sendBtn.disabled = false;
+        setWorking(false);
+        updateSendMode();
+      }
+    }
+
+    function initComputerChrome() {
+      wireGestures();
+      wireComputerKeyboard();
+      applyTrackpadUI();
+      applyZoomTransform();
+
+      document.getElementById("novnc-help")?.addEventListener("click", () => {
+        closeCompMenus();
+        openHelpSheet();
+      });
+      document.getElementById("help-sheet-close")?.addEventListener("click", closeHelpSheet);
+      document.getElementById("help-sheet-backdrop")?.addEventListener("click", (e) => {
+        if (e.target.id === "help-sheet-backdrop") closeHelpSheet();
+      });
+
+      document.getElementById("novnc-more")?.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const menu = document.getElementById("comp-more-menu");
+        const bd = document.getElementById("comp-menu-backdrop");
+        const open = !menu.classList.contains("show");
+        closeCompMenus();
+        if (open) {
+          menu.classList.add("show");
+          bd.classList.add("show");
+          applyTrackpadUI();
+        }
+      });
+
+      document.getElementById("novnc-clipboard")?.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const pop = document.getElementById("clip-popover");
+        const bd = document.getElementById("comp-menu-backdrop");
+        const open = !pop.classList.contains("show");
+        closeCompMenus();
+        if (open) {
+          pop.classList.add("show");
+          bd.classList.add("show");
+        }
+      });
+
+      document.getElementById("comp-menu-backdrop")?.addEventListener("click", closeCompMenus);
+
+      document.getElementById("btn-trackpad-toggle")?.addEventListener("click", () => {
+        setTrackpadMode(!trackpadMode);
+        closeCompMenus();
+      });
+      document.getElementById("btn-recenter-pointer")?.addEventListener("click", () => {
+        recenterPointer();
+        closeCompMenus();
+        showCompToast("Pointer recentered");
+      });
+      document.getElementById("btn-im-done")?.addEventListener("click", () => handBackDone());
+
+      document.getElementById("btn-paste-from-phone")?.addEventListener("click", () => pasteFromPhone());
+      document.getElementById("btn-copy-to-phone")?.addEventListener("click", () => copyToPhone());
+
+      document.getElementById("novnc-keyboard")?.addEventListener("click", () => {
+        closeCompMenus();
+        toggleKeyboard();
+      });
+
+      document.getElementById("paste-fallback-cancel")?.addEventListener("click", () => {
+        document.getElementById("paste-fallback")?.classList.remove("show");
+      });
+      document.getElementById("paste-fallback-ok")?.addEventListener("click", async () => {
+        const ta = document.getElementById("paste-fallback-text");
+        const text = (ta && ta.value) || "";
+        document.getElementById("paste-fallback")?.classList.remove("show");
+        if (text) await sendTextToRemote(text);
+      });
+      document.getElementById("copy-fallback-close")?.addEventListener("click", () => {
+        document.getElementById("copy-fallback")?.classList.remove("show");
+      });
+      document.getElementById("copy-fallback-select")?.addEventListener("click", () => {
+        const ta = document.getElementById("copy-fallback-text");
+        if (ta) { ta.focus(); ta.select(); }
+      });
+
+      // Back also acts as I'm done when leaving computer (navigate only; optional done in menu)
+      document.getElementById("btn-computer-back")?.addEventListener("click", () => {
+        closeKeyboard();
+        closeHelpSheet();
+        closeCompMenus();
+      }, true);
+
+      window.addEventListener("resize", () => {
+        clampPan();
+        applyZoomTransform();
+      });
     }
 
     function newChat() {
@@ -1285,12 +2285,6 @@
     backdrop.addEventListener("click", closeSidebar);
     document.getElementById("novnc-connect").addEventListener("click", connectDesktop);
     document.getElementById("novnc-connect-2").addEventListener("click", connectDesktop);
-    document.getElementById("novnc-clipboard").addEventListener("click", () => {
-      if (novncEmbed) window.open(novncEmbed, "_blank", "noopener");
-    });
-    document.getElementById("novnc-help").addEventListener("click", () => {
-      alert("Animal Nitc Computer streams the live XFCE desktop via same-origin /novnc/ (path=websockify).");
-    });
     novncReload.addEventListener("click", () => {
       if (novncEmbed) {
         desktopEmpty.classList.remove("hidden");
@@ -1301,6 +2295,7 @@
         setTimeout(hide, 2500);
       }
     });
+    initComputerChrome();
 
     document.getElementById("btn-bots-plus").addEventListener("click", showBotsMenu);
     document.getElementById("btn-user-menu").addEventListener("click", showBotsMenu);
@@ -1336,11 +2331,16 @@
         const r = await fetch("/api/config");
         const data = await r.json();
         novncEmbed = data.novnc_embed_url || data.novnc_public_url || fallback;
-        novncOpen.href = novncEmbed;
+        if (novncOpen) novncOpen.href = novncEmbed;
+        if (data.screen && data.screen.width) {
+          screenW = data.screen.width;
+          screenH = data.screen.height;
+        }
       } catch (e) {
         novncEmbed = fallback;
-        novncOpen.href = novncEmbed;
+        if (novncOpen) novncOpen.href = novncEmbed;
       }
+      refreshDesktopHealth();
     }
 
     async function refreshHealth() {

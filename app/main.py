@@ -119,6 +119,8 @@ async def api_config() -> dict[str, Any]:
         "novnc_embed_url": embed,
         "model": settings.model,
         "max_upload_bytes": MAX_UPLOAD_BYTES,
+        "desktop_proxy": "/api/desktop",
+        "screen": {"width": 1280, "height": 800},
     }
 
 
@@ -238,6 +240,72 @@ async def api_chat(body: ChatRequest) -> ChatResponse:
 
 
 # ---------------------------------------------------------------------------
+# Desktop-api reverse proxy (clipboard / mouse / type) → desktop:7090
+_DESKTOP_PROXY_ALLOW = frozenset({
+    "health",
+    "clipboard",
+    "click",
+    "type",
+    "hotkey",
+    "scroll",
+    "mouse",
+})
+
+
+@app.api_route(
+    "/api/desktop/{full_path:path}",
+    methods=["GET", "POST"],
+)
+async def desktop_api_proxy(full_path: str, request: Request) -> Response:
+    """Same-origin proxy to the desktop container control API (limited routes)."""
+    path = full_path.strip("/")
+    root = path.split("/", 1)[0] if path else ""
+    if root not in _DESKTOP_PROXY_ALLOW:
+        raise HTTPException(status_code=404, detail="Unknown desktop route")
+
+    settings = get_settings()
+    upstream = f"{settings.desktop_api_url.rstrip('/')}/{path}"
+    if request.url.query:
+        upstream = f"{upstream}?{request.url.query}"
+
+    headers = {
+        k: v
+        for k, v in request.headers.items()
+        if k.lower() not in _HOP_BY_HOP and k.lower() not in {"content-length"}
+    }
+    body = await request.body()
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(30.0, connect=8.0)) as client:
+            resp = await client.request(
+                request.method,
+                upstream,
+                headers=headers,
+                content=body if body else None,
+                follow_redirects=False,
+            )
+    except httpx.ConnectError as exc:
+        logger.warning("desktop-api unreachable: %s", exc)
+        raise HTTPException(
+            status_code=502,
+            detail="desktop-api unreachable. Is the desktop container running?",
+        ) from exc
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("desktop-api proxy error")
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    out_headers = {
+        k: v
+        for k, v in resp.headers.items()
+        if k.lower() not in _HOP_BY_HOP and k.lower() not in {"content-encoding", "content-length"}
+    }
+    return Response(
+        content=resp.content,
+        status_code=resp.status_code,
+        headers=out_headers,
+        media_type=resp.headers.get("content-type"),
+    )
+
+
 # noVNC reverse proxy (HTTP + WebSocket) → desktop:6080
 # Mobile carriers often block :6080; same-origin /novnc/ on :8080 fixes that.
 # ---------------------------------------------------------------------------

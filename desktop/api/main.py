@@ -86,15 +86,28 @@ class OpenBrowserBody(BaseModel):
     url: str
 
 
+def _screen_size() -> tuple[int, int]:
+    w = int(os.environ.get("SCREEN_WIDTH", "1280") or 1280)
+    h = int(os.environ.get("SCREEN_HEIGHT", "800") or 800)
+    return w, h
+
+
 @app.get("/health")
 async def health() -> dict[str, Any]:
     code, out, err = await _run("xdpyinfo", timeout=5.0)
+    sw, sh = _screen_size()
+    # Prefer live geometry from xdpyinfo when available
+    if code == 0 and out:
+        m = re.search(r"dimensions:\s+(\d+)x(\d+)", out)
+        if m:
+            sw, sh = int(m.group(1)), int(m.group(2))
     return {
         "status": "ok" if code == 0 else "degraded",
         "display": DISPLAY,
         "workspace": str(WORKSPACE),
         "xdpyinfo_ok": code == 0,
         "xdpyinfo_err": err.strip()[:200] if code != 0 else "",
+        "screen": {"width": sw, "height": sh},
     }
 
 
@@ -248,3 +261,123 @@ async def open_browser(body: OpenBrowserBody) -> dict[str, Any]:
         "pid": proc.pid,
         "note": "Browser launched on the shared desktop. Watch/take over via noVNC.",
     }
+
+
+class MouseBody(BaseModel):
+    x: int
+    y: int
+    action: Literal["move", "down", "up", "click"] = "move"
+    button: Literal[1, 2, 3] = 1
+
+
+class ClipboardBody(BaseModel):
+    text: str = ""
+
+
+@app.post("/mouse")
+async def mouse(body: MouseBody) -> dict[str, Any]:
+    """Move / press / release / click mouse on the shared display."""
+    move_code, _, move_err = await _run("xdotool", "mousemove", "--sync", str(body.x), str(body.y))
+    if move_code != 0:
+        raise HTTPException(status_code=500, detail=f"mousemove failed: {move_err[:300]}")
+    btn = str(body.button)
+    if body.action == "move":
+        return {"ok": True, "x": body.x, "y": body.y, "action": "move"}
+    if body.action == "down":
+        code, _, err = await _run("xdotool", "mousedown", btn)
+        if code != 0:
+            raise HTTPException(status_code=500, detail=f"mousedown failed: {err[:300]}")
+        return {"ok": True, "x": body.x, "y": body.y, "action": "down", "button": body.button}
+    if body.action == "up":
+        code, _, err = await _run("xdotool", "mouseup", btn)
+        if code != 0:
+            raise HTTPException(status_code=500, detail=f"mouseup failed: {err[:300]}")
+        return {"ok": True, "x": body.x, "y": body.y, "action": "up", "button": body.button}
+    # click
+    code, _, err = await _run("xdotool", "click", btn)
+    if code != 0:
+        raise HTTPException(status_code=500, detail=f"click failed: {err[:300]}")
+    return {"ok": True, "x": body.x, "y": body.y, "action": "click", "button": body.button}
+
+
+@app.get("/clipboard")
+async def get_clipboard() -> dict[str, Any]:
+    """Read the X11 clipboard (CLIPBOARD selection)."""
+    text_out = ""
+    err_msg = ""
+    if shutil.which("xclip"):
+        code, out, err = await _run("xclip", "-selection", "clipboard", "-o", timeout=5.0)
+        if code == 0:
+            text_out = out
+        else:
+            err_msg = err.strip()[:300]
+            # Fallback primary selection
+            code2, out2, err2 = await _run("xclip", "-selection", "primary", "-o", timeout=5.0)
+            if code2 == 0 and out2:
+                text_out = out2
+            else:
+                err_msg = err_msg or err2.strip()[:300]
+    elif shutil.which("xsel"):
+        code, out, err = await _run("xsel", "--clipboard", "--output", timeout=5.0)
+        if code == 0:
+            text_out = out
+        else:
+            err_msg = err.strip()[:300]
+    else:
+        raise HTTPException(status_code=500, detail="Neither xclip nor xsel available")
+    return {"ok": True, "text": text_out, "error": err_msg or None}
+
+
+@app.post("/clipboard")
+async def set_clipboard(body: ClipboardBody) -> dict[str, Any]:
+    """Write text to the X11 clipboard and optionally type it is left to /type."""
+    payload = body.text if body.text is not None else ""
+    env = _env()
+    if shutil.which("xclip"):
+        proc = await asyncio.create_subprocess_exec(
+            "xclip", "-selection", "clipboard", "-i",
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=env,
+        )
+        try:
+            _, err_b = await asyncio.wait_for(proc.communicate(payload.encode("utf-8", errors="replace")), timeout=5.0)
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.wait()
+            raise HTTPException(status_code=504, detail="xclip timed out")
+        if (proc.returncode or 0) != 0:
+            raise HTTPException(status_code=500, detail=f"xclip failed: {err_b.decode('utf-8', errors='replace')[:300]}")
+        # Also set primary for middle-click paste compatibility
+        proc2 = await asyncio.create_subprocess_exec(
+            "xclip", "-selection", "primary", "-i",
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+            env=env,
+        )
+        try:
+            await asyncio.wait_for(proc2.communicate(payload.encode("utf-8", errors="replace")), timeout=5.0)
+        except asyncio.TimeoutError:
+            proc2.kill()
+            await proc2.wait()
+    elif shutil.which("xsel"):
+        proc = await asyncio.create_subprocess_exec(
+            "xsel", "--clipboard", "--input",
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=env,
+        )
+        try:
+            _, err_b = await asyncio.wait_for(proc.communicate(payload.encode("utf-8", errors="replace")), timeout=5.0)
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.wait()
+            raise HTTPException(status_code=504, detail="xsel timed out")
+        if (proc.returncode or 0) != 0:
+            raise HTTPException(status_code=500, detail=f"xsel failed: {err_b.decode('utf-8', errors='replace')[:300]}")
+    else:
+        raise HTTPException(status_code=500, detail="Neither xclip nor xsel available")
+    return {"ok": True, "text_len": len(payload)}
