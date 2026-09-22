@@ -73,6 +73,12 @@ if [[ -z "${DBUS_SESSION_BUS_ADDRESS:-}" ]] && command -v dbus-launch >/dev/null
   export DBUS_SESSION_BUS_ADDRESS
 fi
 
+# Clear stale X locks from prior crash/restart (prevents "Server is already active for display")
+DISP_NUM="${DISPLAY#:}"
+rm -f "/tmp/.X${DISP_NUM}-lock" "/tmp/.X11-unix/X${DISP_NUM}" 2>/dev/null || true
+pkill -f "Xvfb ${DISPLAY}" 2>/dev/null || true
+sleep 0.2
+
 echo "[entrypoint] Starting Xvfb on $DISPLAY (${SCREEN_WIDTH}x${SCREEN_HEIGHT}x${SCREEN_DEPTH})"
 Xvfb "$DISPLAY" -screen 0 "${SCREEN_WIDTH}x${SCREEN_HEIGHT}x${SCREEN_DEPTH}" \
   -ac +extension GLX +render -noreset &
