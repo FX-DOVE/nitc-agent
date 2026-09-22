@@ -43,6 +43,12 @@ _HOP_BY_HOP = {
 
 @asynccontextmanager
 async def _lifespan(_app: FastAPI):
+    # Ensure job/session dirs exist and are writable by the agent user
+    for root in (jobstore.jobs_root(), jobstore.sessions_root()):
+        try:
+            root.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            pass
     await jobstore.recover_queued_jobs()
     yield
 
@@ -128,6 +134,7 @@ async def health() -> dict[str, Any]:
         "max_upload_bytes": MAX_UPLOAD_BYTES,
         "jobs": True,
         "async_chat": True,
+        "job_pool": jobstore.pool_stats(),
     }
 
 
@@ -618,7 +625,13 @@ async def index() -> FileResponse:
     index_path = STATIC_DIR / "index.html"
     if not index_path.exists():
         raise HTTPException(status_code=404, detail="UI not found")
-    return FileResponse(index_path)
+    return FileResponse(
+        index_path,
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+        },
+    )
 
 
 if STATIC_DIR.exists():

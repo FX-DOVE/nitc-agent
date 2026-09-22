@@ -307,23 +307,28 @@
       width: 100%; max-width: 100%; box-sizing: border-box; background: var(--bg);
       position: relative;
     }
-    .composer { display: flex; gap: 8px; align-items: center; width: 100%; }
+    .composer { display: flex; gap: 8px; align-items: flex-end; width: 100%; }
+    .composer > .icon-btn { flex-shrink: 0; align-self: flex-end; }
     .composer-pill {
-      flex: 1; min-width: 0; display: flex; align-items: center; gap: 4px;
-      height: 44px; padding: 0 6px 0 16px; background: var(--surface-pill);
-      border-radius: 999px; border: none;
+      flex: 1; min-width: 0; display: flex; align-items: flex-end; gap: 4px;
+      min-height: 44px; max-height: 148px; height: auto;
+      padding: 8px 6px 8px 16px; background: var(--surface-pill);
+      border-radius: 22px; border: none; box-sizing: border-box;
     }
     .composer-pill:focus-within { box-shadow: 0 0 0 1px rgba(255,255,255,0.08); }
     #input {
-      flex: 1; resize: none; min-height: 24px; max-height: 120px; height: 24px;
+      flex: 1; resize: none; min-height: 24px; max-height: 132px; height: 24px;
       background: transparent; color: var(--text); border: none; outline: none;
-      padding: 0; line-height: 1.4; font-size: 16px;
+      padding: 0; margin: 0; line-height: 1.4; font-size: 16px;
+      overflow-y: auto; overflow-x: hidden; field-sizing: content;
+      -webkit-overflow-scrolling: touch;
     }
     #input::placeholder { color: var(--muted); }
     .pill-mic {
       width: 36px; height: 36px; border-radius: 50%; border: none;
       background: transparent; color: var(--text); cursor: pointer;
       display: grid; place-items: center; flex-shrink: 0; padding: 0; opacity: 0.9;
+      align-self: flex-end; margin-bottom: -2px;
     }
     .pill-mic.listening { color: var(--danger); opacity: 1; }
 
@@ -524,6 +529,204 @@
       position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
       overflow: hidden; clip: rect(0,0,0,0); border: 0;
     }
+
+    /* —— Profile settings + bot context (v0.2.8) —— */
+    .bots-topbar-actions { display: flex; align-items: center; gap: 8px; }
+    .bots-search-row { display: none; padding: 0 16px 10px; flex-shrink: 0; }
+    .bots-search-row.show { display: block; }
+    .bots-search-row input {
+      width: 100%; background: #1c1c1e; border: 1px solid #2c2c2e; border-radius: 12px;
+      padding: 10px 14px; outline: none; font-size: 16px; color: var(--text);
+    }
+    .bots-search-row input:focus { border-color: #3a3a3c; }
+    .bot-section-hdr {
+      padding: 12px 16px 4px; font-size: 0.75rem; font-weight: 650;
+      color: var(--muted); letter-spacing: 0.04em; text-transform: uppercase;
+    }
+    .bot-row.unread .bot-name { font-weight: 700; }
+    .bot-row .unread-dot {
+      width: 10px; height: 10px; border-radius: 50%; background: #ff9f0a;
+      flex-shrink: 0; align-self: center;
+    }
+    .bot-row .pin-ico { flex-shrink: 0; font-size: 0.72rem; opacity: 0.7; align-self: flex-start; margin-top: 6px; }
+    .bot-row.hidden-bot { opacity: 0.55; }
+
+    .profile-sheet {
+      position: fixed; inset: 0; z-index: 80; background: #000;
+      display: none; flex-direction: column; overflow: hidden;
+      padding-top: var(--safe-top); padding-bottom: var(--safe-bottom);
+    }
+    .profile-sheet.show { display: flex; }
+    .profile-head {
+      display: flex; align-items: center; justify-content: center;
+      position: relative; padding: 12px 16px; flex-shrink: 0;
+    }
+    .profile-head h1 { margin: 0; font-size: 1.05rem; font-weight: 700; letter-spacing: -0.02em; }
+    .profile-close {
+      position: absolute; left: 12px; top: 50%; transform: translateY(-50%);
+      width: 36px; height: 36px; border-radius: 50%; border: none;
+      background: #1c1c1e; color: var(--text); cursor: pointer; display: grid; place-items: center;
+    }
+    .profile-body {
+      flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch;
+      padding: 4px 16px 28px;
+    }
+    .profile-stack { display: none; }
+    .profile-stack.active { display: block; }
+    .ps-card { background: #1c1c1e; border-radius: 16px; overflow: hidden; margin-bottom: 14px; }
+    .ps-row {
+      display: flex; align-items: center; gap: 12px; padding: 14px;
+      border: none; background: transparent; width: 100%; text-align: left; color: inherit;
+      cursor: pointer; border-bottom: 1px solid rgba(255,255,255,0.06);
+      -webkit-tap-highlight-color: transparent;
+    }
+    .ps-row:last-child { border-bottom: none; }
+    .ps-row:active { background: rgba(255,255,255,0.05); }
+    .ps-row.static { cursor: default; }
+    .ps-row.static:active { background: transparent; }
+    .ps-row .ps-label { flex: 1; min-width: 0; }
+    .ps-row .ps-label .t { font-weight: 600; font-size: 0.98rem; letter-spacing: -0.01em; display: block; }
+    .ps-row .ps-label .s { color: var(--muted); font-size: 0.82rem; margin-top: 2px; line-height: 1.3; display: block; }
+    .ps-row .ps-value {
+      color: var(--muted); font-size: 0.9rem; flex-shrink: 0; max-width: 46%;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: right;
+    }
+    .ps-row .ps-chev { color: var(--muted); flex-shrink: 0; opacity: 0.75; font-size: 1.1rem; }
+    .ps-row.danger .t, .ps-row.danger { color: var(--danger); }
+    .ps-sec { margin: 18px 4px 8px; font-size: 0.78rem; font-weight: 600; color: var(--muted); }
+    .ps-user { display: flex; align-items: center; gap: 14px; padding: 16px 14px; cursor: pointer; }
+    .ps-user .av {
+      width: 56px; height: 56px; border-radius: 50%;
+      background: linear-gradient(145deg, #5b8def, #3a5fc8);
+      color: #fff; font-weight: 700; font-size: 1rem; display: grid; place-items: center; flex-shrink: 0;
+    }
+    .ps-user .nm { font-weight: 700; font-size: 1.1rem; letter-spacing: -0.02em; }
+    .ps-user .em { color: var(--muted); font-size: 0.88rem; margin-top: 2px; }
+    .ps-usage {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 12px 14px 16px; border-top: 1px solid rgba(255,255,255,0.06); cursor: pointer;
+    }
+    .ps-usage .bar-wrap { flex: 1; margin-right: 12px; }
+    .ps-usage .bar-lbl { font-size: 0.88rem; color: var(--text-secondary); margin-bottom: 6px; }
+    .ps-usage .bar { height: 6px; border-radius: 999px; background: #2c2c2e; overflow: hidden; }
+    .ps-usage .bar > i { display: block; height: 100%; background: #34c759; border-radius: 999px; }
+    .ps-usage .pct { font-weight: 700; font-size: 0.95rem; }
+    .nitc-toggle {
+      width: 48px; height: 30px; border-radius: 999px; border: none;
+      background: #3a3a3c; position: relative; cursor: pointer; flex-shrink: 0;
+      transition: background .2s; padding: 0;
+    }
+    .nitc-toggle.on { background: #34c759; }
+    .nitc-toggle::after {
+      content: ""; position: absolute; top: 3px; left: 3px;
+      width: 24px; height: 24px; border-radius: 50%; background: #fff;
+      transition: transform .2s; box-shadow: 0 1px 3px rgba(0,0,0,0.35);
+    }
+    .nitc-toggle.on::after { transform: translateX(18px); }
+    .ps-footer { text-align: center; padding: 24px 8px 8px; color: var(--muted); font-size: 0.82rem; }
+    .ps-footer .brand { font-weight: 600; color: var(--text-secondary); margin-bottom: 4px; }
+    .ps-sub-back {
+      display: inline-flex; align-items: center; gap: 4px; border: none;
+      background: transparent; color: var(--text); font-weight: 600;
+      cursor: pointer; padding: 4px 0; margin-bottom: 8px; font-size: 0.95rem;
+    }
+    .ps-md { color: var(--text-secondary); font-size: 0.92rem; line-height: 1.5; padding: 4px 2px 16px; }
+    .ps-md h3 { color: var(--text); margin: 12px 0 6px; font-size: 1rem; }
+    .ps-rule-list { list-style: none; margin: 0; padding: 0; }
+    .ps-rule-list li {
+      display: flex; align-items: center; gap: 10px;
+      padding: 12px 14px; border-bottom: 1px solid rgba(255,255,255,0.06);
+    }
+    .ps-rule-list li:last-child { border-bottom: none; }
+    .ps-rule-list .rtxt { flex: 1; min-width: 0; word-break: break-word; }
+    .ps-rule-list .rdel {
+      border: none; background: transparent; color: var(--danger);
+      cursor: pointer; font-weight: 600; padding: 6px;
+    }
+    .ps-add-row { display: flex; gap: 8px; padding: 12px 14px; }
+    .ps-add-row input {
+      flex: 1; background: #2c2c2e; border: 1px solid #3a3a3c; border-radius: 10px;
+      padding: 10px 12px; outline: none; color: var(--text); font-size: 16px;
+    }
+    .ps-add-row button {
+      border: none; border-radius: 999px; padding: 8px 14px; background: #fff;
+      color: #000; font-weight: 700; cursor: pointer;
+    }
+    .ps-plugin-row {
+      display: flex; align-items: center; gap: 12px; padding: 14px;
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+    }
+    .ps-plugin-row:last-child { border-bottom: none; }
+    .ps-plugin-row .pl-meta { flex: 1; min-width: 0; }
+    .ps-plugin-row .pl-name { font-weight: 600; }
+    .ps-plugin-row .pl-desc { color: var(--muted); font-size: 0.82rem; margin-top: 2px; }
+    .ps-select {
+      background: #2c2c2e; border: 1px solid #3a3a3c; border-radius: 10px;
+      color: var(--text); padding: 8px 10px; font-size: 0.92rem; max-width: 180px;
+    }
+    .ps-feedback-ta {
+      width: 100%; min-height: 120px; background: #2c2c2e; border: 1px solid #3a3a3c;
+      border-radius: 12px; padding: 12px; color: var(--text); font-size: 16px;
+      resize: vertical; outline: none; margin-bottom: 12px;
+    }
+    .ps-btn {
+      border: none; border-radius: 999px; padding: 10px 18px; background: #fff;
+      color: #000; font-weight: 700; cursor: pointer; font-size: 0.92rem;
+    }
+    .ps-btn.secondary { background: #2c2c2e; color: var(--text); text-decoration: none; display: inline-flex; align-items: center; }
+    .badge-count {
+      background: #3a3a3c; color: var(--text); font-size: 0.75rem; font-weight: 700;
+      border-radius: 999px; padding: 2px 8px; min-width: 22px; text-align: center;
+    }
+
+    .bot-ctx-backdrop {
+      position: fixed; inset: 0; z-index: 70; background: rgba(0,0,0,0.45);
+      display: none; align-items: center; justify-content: center; padding: 24px 18px;
+    }
+    .bot-ctx-backdrop.show { display: flex; }
+    .bot-ctx-card {
+      width: 100%; max-width: 340px; background: #2c2c2e; border-radius: 18px;
+      overflow: hidden; box-shadow: 0 20px 60px rgba(0,0,0,0.55);
+      max-height: min(80vh, 560px); display: flex; flex-direction: column;
+    }
+    .bot-ctx-head { display: flex; align-items: center; gap: 12px; padding: 16px 16px 12px; }
+    .bot-ctx-head .bot-avatar { width: 44px; height: 44px; }
+    .bot-ctx-head .bot-avatar svg { width: 44px; height: 44px; }
+    .bot-ctx-head .nm { font-weight: 700; font-size: 1.02rem; }
+    .bot-ctx-preview {
+      margin: 0 16px 12px; background: #1c1c1e; border-radius: 14px;
+      padding: 10px 12px; color: var(--text-secondary); font-size: 0.88rem;
+      max-height: 64px; overflow: hidden; line-height: 1.35;
+    }
+    .bot-ctx-actions { overflow-y: auto; -webkit-overflow-scrolling: touch; padding-bottom: 6px; }
+    .bot-ctx-actions button {
+      display: flex; align-items: center; gap: 12px; width: 100%;
+      padding: 13px 16px; border: none; background: transparent;
+      color: var(--text); cursor: pointer; font-size: 0.98rem; text-align: left;
+    }
+    .bot-ctx-actions button:active { background: rgba(255,255,255,0.08); }
+    .bot-ctx-actions button.danger { color: var(--danger); }
+    .bot-ctx-actions .mi {
+      width: 22px; height: 22px; display: grid; place-items: center;
+      color: var(--text-secondary); flex-shrink: 0; font-size: 0.85rem;
+    }
+    .bot-ctx-actions button.danger .mi { color: var(--danger); }
+    .bot-ctx-actions .chev { margin-left: auto; color: var(--muted); transition: transform .15s; }
+    .bot-ctx-actions .chev.open { transform: rotate(90deg); }
+    .bot-ctx-more { display: none; }
+    .bot-ctx-more.show { display: block; }
+    .bot-ctx-more button { padding-left: 22px; }
+
+    .app-toast {
+      position: fixed; left: 50%; bottom: calc(max(20px, var(--safe-bottom)) + 24px);
+      transform: translateX(-50%); z-index: 100;
+      background: rgba(44,44,46,0.96); color: var(--text); padding: 11px 18px;
+      border-radius: 12px; font-size: 0.9rem; pointer-events: none;
+      opacity: 0; transition: opacity .2s; max-width: 88%; text-align: center;
+      box-shadow: 0 8px 28px rgba(0,0,0,0.4);
+    }
+    .app-toast.show { opacity: 1; }
+
     .sidebar, .backdrop, .sidebar-foot, .composer-hint, .desktop-meta { display: none !important; }
   </style>
 </head>
@@ -546,12 +749,22 @@
       <section class="view active" id="view-bots">
         <header class="bots-topbar">
           <button type="button" class="user-avatar" id="btn-user-menu" aria-label="Account menu" title="Menu">CO</button>
-          <button type="button" class="icon-btn" id="btn-bots-plus" aria-label="New" title="New">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-              <path d="M12 5v14M5 12h14"/>
-            </svg>
-          </button>
+          <div class="bots-topbar-actions">
+            <button type="button" class="icon-btn" id="btn-bots-search" aria-label="Search" title="Search">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                <circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/>
+              </svg>
+            </button>
+            <button type="button" class="icon-btn" id="btn-bots-plus" aria-label="New" title="New">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                <path d="M12 5v14M5 12h14"/>
+              </svg>
+            </button>
+          </div>
         </header>
+        <div class="bots-search-row" id="bots-search-row">
+          <input type="search" id="bots-search-input" placeholder="Search bots" autocomplete="off" enterkeyhint="search" />
+        </div>
         <div class="bots-list" id="bots-list"></div>
         <div class="float-menu-backdrop" id="menu-backdrop"></div>
         <div class="float-menu" id="bots-menu" role="menu">
@@ -1024,22 +1237,99 @@
     }
 
     function renderBotsList() {
-      const sorted = bots.slice().sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+      const q = (botsSearchQuery || "").trim().toLowerCase();
+      let list = bots.filter((b) => !b.hidden);
+      if (q) {
+        list = list.filter((b) =>
+          (b.name || "").toLowerCase().includes(q) ||
+          (b.snippet || "").toLowerCase().includes(q) ||
+          (b.section || "").toLowerCase().includes(q)
+        );
+      }
+      const hidden = q ? [] : bots.filter((b) => b.hidden);
+
+      function sortBots(arr) {
+        return arr.slice().sort((a, b) => {
+          const ap = a.pinned ? 1 : 0;
+          const bp = b.pinned ? 1 : 0;
+          if (ap !== bp) return bp - ap;
+          if (ap && bp) return (b.pinnedAt || 0) - (a.pinnedAt || 0);
+          return (b.updatedAt || 0) - (a.updatedAt || 0);
+        });
+      }
+
       botsListEl.innerHTML = "";
-      sorted.forEach((bot) => {
+      const bySection = {};
+      const noSection = [];
+      sortBots(list).forEach((bot) => {
+        const sec = (bot.section || "").trim();
+        if (sec) {
+          if (!bySection[sec]) bySection[sec] = [];
+          bySection[sec].push(bot);
+        } else {
+          noSection.push(bot);
+        }
+      });
+
+      function appendRow(bot) {
         const row = document.createElement("button");
         row.type = "button";
-        row.className = "bot-row";
+        row.className = "bot-row" + (bot.unread ? " unread" : "") + (bot.hidden ? " hidden-bot" : "");
+        row.dataset.botId = bot.id;
+        let extras = "";
+        if (bot.pinned) extras += '<span class="pin-ico" title="Pinned">📌</span>';
+        if (bot.unread) extras += '<span class="unread-dot" title="Unread"></span>';
         row.innerHTML =
           '<div class="bot-avatar">' + botAvatarSvg(bot.color) + "</div>" +
           '<div class="bot-meta">' +
           '<div class="bot-name">' + escapeHtml(bot.name) + (bot.kind === "group" ? " · Group" : "") + "</div>" +
           '<div class="bot-snippet">' + escapeHtml(bot.snippet || "No messages yet") + "</div>" +
           "</div>" +
+          extras +
           '<div class="bot-time">' + escapeHtml(formatListTime(bot.updatedAt)) + "</div>";
-        row.addEventListener("click", () => openBot(bot.id));
+        row.addEventListener("click", () => {
+          if (suppressBotClick) {
+            suppressBotClick = false;
+            return;
+          }
+          if (bot.unread) {
+            bot.unread = false;
+            saveBots();
+          }
+          openBot(bot.id);
+        });
+        bindBotRowLongPress(row, bot.id);
         botsListEl.appendChild(row);
+      }
+
+      noSection.forEach(appendRow);
+      Object.keys(bySection).sort((a, b) => a.localeCompare(b)).forEach((sec) => {
+        const hdr = document.createElement("div");
+        hdr.className = "bot-section-hdr";
+        hdr.textContent = sec;
+        botsListEl.appendChild(hdr);
+        bySection[sec].forEach(appendRow);
       });
+
+      if (hidden.length) {
+        const hdr = document.createElement("div");
+        hdr.className = "bot-section-hdr";
+        hdr.textContent = "Hidden";
+        hdr.style.cursor = "pointer";
+        hdr.addEventListener("click", () => {
+          openProfileSheet();
+          profileNav("hidden");
+        });
+        botsListEl.appendChild(hdr);
+        sortBots(hidden).forEach(appendRow);
+      }
+
+      if (!list.length && !hidden.length) {
+        const empty = document.createElement("div");
+        empty.style.cssText = "padding:32px 20px;color:var(--muted);text-align:center";
+        empty.textContent = q ? "No matches" : "No bots yet — tap +";
+        botsListEl.appendChild(empty);
+      }
     }
 
     function openBot(id) {
@@ -1053,6 +1343,7 @@
       document.getElementById("chat-title-text").textContent = bot.name;
       document.getElementById("computer-title").textContent = bot.name;
       document.getElementById("working-label").textContent = bot.name + " is working";
+      refreshWorkingStatus();
       input.placeholder = "Ask " + bot.name;
       document.getElementById("chat-title-pill").title = bot.name;
       // update teardrop color lightly via pill svg path
@@ -1168,36 +1459,84 @@
     function rememberBotJob(jobId, status) {
       const bot = getActiveBot();
       if (!bot) return;
-      bot.activeJobId = status === "completed" || status === "failed" || status === "cancelled" ? null : jobId;
+      if (!Array.isArray(bot.activeJobIds)) bot.activeJobIds = [];
+      const done = status === "completed" || status === "failed" || status === "cancelled";
+      if (done) {
+        bot.activeJobIds = bot.activeJobIds.filter((id) => id !== jobId);
+        if (bot.activeJobId === jobId) bot.activeJobId = bot.activeJobIds[0] || null;
+        if (bot.pendingJobId === jobId) bot.pendingJobId = bot.activeJobIds[0] || null;
+      } else {
+        if (!bot.activeJobIds.includes(jobId)) bot.activeJobIds.push(jobId);
+        bot.activeJobId = jobId;
+        bot.pendingJobId = jobId;
+      }
       bot.lastJobId = jobId;
       saveBots();
+      refreshWorkingStatus();
     }
+
+    function refreshWorkingStatus() {
+      const bot = getActiveBot();
+      const name = (bot && bot.name) || "Bot";
+      const ids = (bot && Array.isArray(bot.activeJobIds) && bot.activeJobIds.length)
+        ? bot.activeJobIds.slice()
+        : Object.keys(activeJobPolls);
+      const n = ids.length;
+      // Count queued vs running from last known poll snapshots if available
+      let running = 0;
+      let queued = 0;
+      ids.forEach((id) => {
+        const st = (jobStatusCache[id] || "").toLowerCase();
+        if (st === "queued") queued += 1;
+        else running += 1; // running or unknown while polling
+      });
+      if (!n) {
+        setWorking(false);
+        document.getElementById("working-label").textContent = name + " is working";
+        return;
+      }
+      setWorking(true);
+      let label;
+      if (queued && running) label = name + ": " + running + " running · " + queued + " queued";
+      else if (queued && !running) label = name + ": " + queued + " queued";
+      else if (n === 1) label = name + " is working";
+      else label = name + ": " + n + " running";
+      document.getElementById("working-label").textContent = label;
+    }
+
+    const jobStatusCache = {};
 
     async function runJobAndRender(apiMessages, attachments, thinkingEl) {
       const created = await createChatJob(apiMessages, attachments);
       const jobId = created.job_id;
+      jobStatusCache[jobId] = created.status || "queued";
       rememberBotJob(jobId, "queued");
-      const bot = getActiveBot();
-      if (bot) {
-        bot.pendingJobId = jobId;
-        saveBots();
-      }
+      refreshWorkingStatus();
 
       const job = await waitForJob(jobId, {
         onUpdate: (j) => {
-          if (j && j.status) rememberBotJob(jobId, j.status);
+          if (j && j.status) {
+            jobStatusCache[jobId] = j.status;
+            rememberBotJob(jobId, j.status);
+            refreshWorkingStatus();
+          }
         },
       });
 
-      if (thinkingEl && thinkingEl.remove) thinkingEl.remove();
-      setWorking(false);
+      if (thinkingEl && thinkingEl.parentNode) thinkingEl.remove();
+      delete jobStatusCache[jobId];
+      rememberBotJob(jobId, job.status || "completed");
+      refreshWorkingStatus();
+
+      // Only append if this chat is still the same bot session
+      const already = history.some((m) => m.job_id === jobId && m.role === "assistant");
+      if (already) return job;
 
       if (job.status === "failed") {
         const err = job.error || job.reply || "Job failed";
         appendMessage("assistant", String(err));
         history.push({ role: "assistant", content: String(err), job_id: jobId, failed: true });
         persistActiveChat();
-        rememberBotJob(jobId, "failed");
         return job;
       }
 
@@ -1207,132 +1546,133 @@
       appendMessage("assistant", reply, extra, images);
       history.push({ role: "assistant", content: reply, images, job_id: jobId });
       persistActiveChat();
-      rememberBotJob(jobId, "completed");
-      const b = getActiveBot();
-      if (b) {
-        b.pendingJobId = null;
-        saveBots();
-      }
       return job;
+    }
+
+    async function trackJobToCompletion(jobId, thinkingEl) {
+      if (!jobId || activeJobPolls[jobId]) return;
+      jobStatusCache[jobId] = jobStatusCache[jobId] || "running";
+      rememberBotJob(jobId, "running");
+      refreshWorkingStatus();
+      try {
+        const done = await waitForJob(jobId, {
+          onUpdate: (j) => {
+            if (j && j.status) {
+              jobStatusCache[jobId] = j.status;
+              rememberBotJob(jobId, j.status);
+              refreshWorkingStatus();
+            }
+          },
+        });
+        if (thinkingEl && thinkingEl.parentNode) thinkingEl.remove();
+        delete jobStatusCache[jobId];
+        rememberBotJob(jobId, done.status || "completed");
+        refreshWorkingStatus();
+        const already = history.some((m) => m.job_id === jobId && m.role === "assistant");
+        if (already) return;
+        if (done.status === "failed") {
+          const err = done.error || done.reply || "Job failed";
+          appendMessage("assistant", String(err));
+          history.push({ role: "assistant", content: String(err), job_id: jobId, failed: true });
+        } else {
+          const reply = done.reply || "";
+          const images = Array.isArray(done.images) ? done.images : [];
+          appendMessage("assistant", reply, null, images);
+          history.push({ role: "assistant", content: reply, images, job_id: jobId });
+        }
+        persistActiveChat();
+      } catch (err) {
+        if (thinkingEl && thinkingEl.parentNode) thinkingEl.remove();
+        appendMessage(
+          "system",
+          "Reconnecting… The server is still working. " + String(err.message || err)
+        );
+        reconnectAttempted[jobId] = false;
+      }
     }
 
     async function resumeActiveJobsForBot() {
       const bot = getActiveBot();
       if (!bot) return;
-      const jobId = bot.activeJobId || bot.pendingJobId || bot.lastJobId;
-      if (!jobId) {
-        // Also ask server for session active jobs (cross-device)
-        try {
-          const r = await fetch("/api/sessions/" + encodeURIComponent(bot.id), { cache: "no-store" });
-          if (r.ok) {
-            const data = await r.json();
-            const active = (data.active_jobs || [])[0];
-            if (active && active.job_id) {
-              bot.activeJobId = active.job_id;
-              saveBots();
-              return resumeActiveJobsForBot();
-            }
-            // If last recent job completed and history missing assistant — hydrate
-            const recent = (data.recent_jobs || []).find((j) => j.status === "completed" && j.reply);
-            if (recent && recent.reply) {
-              const already = history.some((m) => m.job_id === recent.job_id);
-              if (!already) {
-                const last = history[history.length - 1];
-                if (!last || last.role !== "assistant" || last.content !== recent.reply) {
-                  appendMessage("assistant", recent.reply, null, recent.images || []);
-                  history.push({
-                    role: "assistant",
-                    content: recent.reply,
-                    images: recent.images || [],
-                    job_id: recent.job_id,
-                  });
-                  persistActiveChat();
-                }
+      const known = [];
+      if (Array.isArray(bot.activeJobIds)) known.push(...bot.activeJobIds);
+      if (bot.activeJobId) known.push(bot.activeJobId);
+      if (bot.pendingJobId) known.push(bot.pendingJobId);
+      // Server may have more concurrent jobs for this session
+      try {
+        const r = await fetch("/api/sessions/" + encodeURIComponent(bot.id), { cache: "no-store" });
+        if (r.ok) {
+          const data = await r.json();
+          (data.active_jobs || []).forEach((j) => {
+            const id = j.job_id || j.id;
+            if (id) known.push(id);
+          });
+          // Hydrate completed jobs missing from history
+          (data.recent_jobs || []).forEach((recent) => {
+            if (recent.status === "completed" && recent.reply) {
+              const id = recent.job_id || recent.id;
+              if (id && !history.some((m) => m.job_id === id && m.role === "assistant")) {
+                appendMessage("assistant", recent.reply, null, recent.images || []);
+                history.push({
+                  role: "assistant",
+                  content: recent.reply,
+                  images: recent.images || [],
+                  job_id: id,
+                });
+                persistActiveChat();
               }
             }
-          }
-        } catch (_) {}
-        return;
-      }
-      if (reconnectAttempted[jobId]) return;
-      reconnectAttempted[jobId] = true;
-      if (sending) return;
-
-      let job = null;
-      try {
-        job = await fetchJob(jobId);
-      } catch (_) {
-        reconnectAttempted[jobId] = false;
-        return;
-      }
-      if (!job) {
-        bot.activeJobId = null;
-        bot.pendingJobId = null;
-        saveBots();
-        return;
-      }
-
-      if (job.status === "queued" || job.status === "running") {
-        sending = true;
-        sendBtn.disabled = true;
-        setWorking(true);
-        const thinking = appendMessage("assistant", "__thinking__");
-        try {
-          const done = await waitForJob(jobId);
-          thinking.remove();
-          setWorking(false);
-          // Avoid duplicating if already in history
-          const already = history.some((m) => m.job_id === jobId && m.role === "assistant");
-          if (!already) {
-            if (done.status === "failed") {
-              const err = done.error || done.reply || "Job failed";
-              appendMessage("assistant", String(err));
-              history.push({ role: "assistant", content: String(err), job_id: jobId, failed: true });
-            } else {
-              const reply = done.reply || "";
-              const images = Array.isArray(done.images) ? done.images : [];
-              appendMessage("assistant", reply, null, images);
-              history.push({ role: "assistant", content: reply, images, job_id: jobId });
-            }
-            persistActiveChat();
-          }
-          rememberBotJob(jobId, done.status);
-        } catch (err) {
-          thinking.remove();
-          setWorking(false);
-          appendMessage(
-            "system",
-            "Reconnecting… The server is still working. " + String(err.message || err)
-          );
-        } finally {
-          sending = false;
-          sendBtn.disabled = false;
-          updateSendMode();
-          reconnectAttempted[jobId] = false;
-        }
-        return;
-      }
-
-      // Completed/failed while we were away
-      const already = history.some((m) => m.job_id === jobId && m.role === "assistant");
-      if (!already && (job.reply || job.error)) {
-        if (job.status === "failed") {
-          const err = job.error || job.reply || "Job failed";
-          appendMessage("assistant", String(err));
-          history.push({ role: "assistant", content: String(err), job_id: jobId, failed: true });
-        } else {
-          appendMessage("assistant", job.reply || "", null, job.images || []);
-          history.push({
-            role: "assistant",
-            content: job.reply || "",
-            images: job.images || [],
-            job_id: jobId,
           });
         }
-        persistActiveChat();
+      } catch (_) {}
+
+      const uniq = [...new Set(known.filter(Boolean))];
+      for (const jobId of uniq) {
+        if (reconnectAttempted[jobId] || activeJobPolls[jobId]) continue;
+        reconnectAttempted[jobId] = true;
+        let job = null;
+        try {
+          job = await fetchJob(jobId);
+        } catch (_) {
+          reconnectAttempted[jobId] = false;
+          continue;
+        }
+        if (!job) {
+          rememberBotJob(jobId, "completed");
+          reconnectAttempted[jobId] = false;
+          continue;
+        }
+        if (job.status === "queued" || job.status === "running") {
+          jobStatusCache[jobId] = job.status;
+          const thinking = appendMessage("assistant", "__thinking__");
+          // fire-and-forget; do not block composer
+          trackJobToCompletion(jobId, thinking).finally(() => {
+            reconnectAttempted[jobId] = false;
+          });
+          continue;
+        }
+        // Completed while away
+        const already = history.some((m) => m.job_id === jobId && m.role === "assistant");
+        if (!already && (job.reply || job.error)) {
+          if (job.status === "failed") {
+            const err = job.error || job.reply || "Job failed";
+            appendMessage("assistant", String(err));
+            history.push({ role: "assistant", content: String(err), job_id: jobId, failed: true });
+          } else {
+            appendMessage("assistant", job.reply || "", null, job.images || []);
+            history.push({
+              role: "assistant",
+              content: job.reply || "",
+              images: job.images || [],
+              job_id: jobId,
+            });
+          }
+          persistActiveChat();
+        }
+        rememberBotJob(jobId, job.status);
+        reconnectAttempted[jobId] = false;
       }
-      rememberBotJob(jobId, job.status);
-      reconnectAttempted[jobId] = false;
+      refreshWorkingStatus();
     }
 
     function renderMessagesFromHistory() {
@@ -1353,8 +1693,12 @@
     }
 
     function autoResize() {
-      input.style.height = "auto";
-      input.style.height = Math.min(input.scrollHeight, 120) + "px";
+      // iMessage/Grok-style grow: 1 line min, ~5–6 lines max, then scroll
+      const maxH = 132; // ~6 * 22px line-height
+      input.style.height = "0px";
+      const next = Math.min(Math.max(input.scrollHeight, 24), maxH);
+      input.style.height = next + "px";
+      input.style.overflowY = input.scrollHeight > maxH ? "auto" : "hidden";
     }
     input.addEventListener("input", () => {
       autoResize();
@@ -2115,31 +2459,28 @@
       closeKeyboard();
       // Navigate back and send resume token if not already sending
       setView("chat");
-      if (sending) return;
       const text = "done";
       appendTimestampIfNeeded();
       appendMessage("user", text);
       history.push({ role: "user", content: text });
       persistActiveChat();
-      sending = true;
-      sendBtn.disabled = true;
-      setWorking(true);
       const thinking = appendMessage("assistant", "__thinking__");
-      try {
-        const apiMessages = history.map((m) => ({
-          role: m.role,
-          content: typeof m.content === "string" ? m.content : String(m.content || ""),
-        }));
-        await runJobAndRender(apiMessages, [], thinking);
-      } catch (err) {
-        if (thinking && thinking.parentNode) thinking.remove();
-        appendMessage("system", String(err && err.message || err));
-      } finally {
-        sending = false;
-        sendBtn.disabled = false;
-        setWorking(false);
-        updateSendMode();
-      }
+      refreshWorkingStatus();
+      const apiMessages = history.map((m) => ({
+        role: m.role,
+        content: typeof m.content === "string" ? m.content : String(m.content || ""),
+      }));
+      (async () => {
+        try {
+          await runJobAndRender(apiMessages, [], thinking);
+        } catch (err) {
+          if (thinking && thinking.parentNode) thinking.remove();
+          appendMessage("system", String(err && err.message || err));
+        } finally {
+          updateSendMode();
+          refreshWorkingStatus();
+        }
+      })();
     }
 
     function initComputerChrome() {
@@ -2545,7 +2886,7 @@
     initComputerChrome();
 
     document.getElementById("btn-bots-plus").addEventListener("click", showBotsMenu);
-    document.getElementById("btn-user-menu").addEventListener("click", showBotsMenu);
+    document.getElementById("btn-user-menu").addEventListener("click", openProfileSheet);
     menuBackdrop.addEventListener("click", closeBotsMenu);
     document.getElementById("menu-new-bot").addEventListener("click", () => {
       closeBotsMenu();
@@ -2578,6 +2919,7 @@
         const r = await fetch("/api/config");
         const data = await r.json();
         novncEmbed = data.novnc_embed_url || data.novnc_public_url || fallback;
+        if (data.version) appVersion = data.version;
         if (novncOpen) novncOpen.href = novncEmbed;
         if (data.screen && data.screen.width) {
           screenW = data.screen.width;
@@ -2604,7 +2946,7 @@
 
     form.addEventListener("submit", async (e) => {
       e.preventDefault();
-      if (sending) return;
+      // Allow Send while other jobs are running — never block or cancel in-flight work
       const text = input.value.trim();
       const atts = pendingAttachments.slice();
       if (!text && !atts.length) return;
@@ -2629,98 +2971,35 @@
       });
       persistActiveChat();
 
-      sending = true;
-      sendBtn.disabled = true;
-      setWorking(true);
       const thinking = appendMessage("assistant", "__thinking__");
-      try {
-        // API history: plain text only (attachments sent separately for last turn)
-        const apiMessages = history.map((m) => ({
-          role: m.role,
-          content: typeof m.content === "string" ? m.content : String(m.content || ""),
-        }));
-        // Durable job: short POST, then poll — server keeps working if client drops
-        await runJobAndRender(apiMessages, atts, thinking);
-      } catch (err) {
-        if (thinking && thinking.parentNode) thinking.remove();
-        setWorking(false);
-        const msg = String(err && err.message || err);
-        // Prefer reconnect messaging over raw "Load failed"
-        if (/load failed|failed to fetch|networkerror|network error/i.test(msg)) {
-          appendMessage(
-            "system",
-            "Connection interrupted. The server may still be working — reopen this chat or tap Try again."
-          );
-          const retry = document.createElement("button");
-          retry.type = "button";
-          retry.className = "chip";
-          retry.textContent = "Try again";
-          retry.style.margin = "8px 12px";
-          retry.addEventListener("click", async () => {
-            retry.disabled = true;
-            const bot = getActiveBot();
-            const jid = bot && (bot.activeJobId || bot.pendingJobId || bot.lastJobId);
-            if (jid) {
-              reconnectAttempted[jid] = false;
-              await resumeActiveJobsForBot();
-              if (!sending) {
-                // Server job gone — create a fresh retry job from last user turn
-                const lastJob = jid && (await fetchJob(jid).catch(() => null));
-                if (lastJob && (lastJob.status === "failed" || lastJob.status === "completed")) {
-                  sending = true;
-                  setWorking(true);
-                  const th = appendMessage("assistant", "__thinking__");
-                  try {
-                    const rr = await fetch("/api/jobs/" + encodeURIComponent(jid) + "/retry", { method: "POST" });
-                    const nd = await rr.json().catch(() => ({}));
-                    if (rr.ok && nd.job_id) {
-                      rememberBotJob(nd.job_id, "queued");
-                      const done = await waitForJob(nd.job_id);
-                      th.remove();
-                      setWorking(false);
-                      if (done.status === "failed") {
-                        appendMessage("assistant", done.error || done.reply || "Retry failed");
-                      } else {
-                        appendMessage("assistant", done.reply || "", null, done.images || []);
-                        history.push({
-                          role: "assistant",
-                          content: done.reply || "",
-                          images: done.images || [],
-                          job_id: done.job_id || nd.job_id,
-                        });
-                        persistActiveChat();
-                      }
-                    } else {
-                      th.remove();
-                      setWorking(false);
-                      appendMessage("system", (nd && nd.detail) || "Retry failed");
-                    }
-                  } catch (e2) {
-                    th.remove();
-                    setWorking(false);
-                    appendMessage("system", String(e2.message || e2));
-                  } finally {
-                    sending = false;
-                    sendBtn.disabled = false;
-                    updateSendMode();
-                  }
-                }
-              }
-            } else {
-              appendMessage("system", "No active job to resume — send your message again.");
-            }
-            retry.remove();
-          });
-          messagesEl.appendChild(retry);
-        } else {
-          appendMessage("system", msg);
+      refreshWorkingStatus();
+      // Snapshot history for this job (includes this user turn)
+      const apiMessages = history.map((m) => ({
+        role: m.role,
+        content: typeof m.content === "string" ? m.content : String(m.content || ""),
+      }));
+      // Fire-and-forget: composer stays enabled for more tasks
+      (async () => {
+        try {
+          await runJobAndRender(apiMessages, atts, thinking);
+        } catch (err) {
+          if (thinking && thinking.parentNode) thinking.remove();
+          refreshWorkingStatus();
+          const msg = String(err && err.message || err);
+          if (/load failed|failed to fetch|networkerror|network error/i.test(msg)) {
+            appendMessage(
+              "system",
+              "Connection interrupted. The server may still be working — reopen this chat or tap Try again."
+            );
+          } else {
+            appendMessage("system", msg);
+          }
+        } finally {
+          input.focus();
+          updateSendMode();
+          refreshWorkingStatus();
         }
-      } finally {
-        sending = false;
-        sendBtn.disabled = false;
-        input.focus();
-        updateSendMode();
-      }
+      })();
     });
 
     input.addEventListener("keydown", (e) => {
@@ -2730,13 +3009,872 @@
       }
     });
 
+
+    // ========== Profile settings + bot long-press (v0.2.8) ==========
+    const SETTINGS_KEY = "nitc_settings_v1";
+    const TIMEZONES = [
+      "Africa/Lagos", "UTC", "America/New_York", "America/Chicago", "America/Denver",
+      "America/Los_Angeles", "Europe/London", "Europe/Paris", "Europe/Berlin",
+      "Asia/Dubai", "Asia/Kolkata", "Asia/Shanghai", "Asia/Tokyo", "Australia/Sydney",
+    ];
+    const DEFAULT_PLUGINS = [
+      { id: "browser", name: "Browser", desc: "Navigate and interact with the web", on: true },
+      { id: "desktop", name: "Desktop", desc: "Control the live XFCE desktop", on: true },
+      { id: "files", name: "Files", desc: "Read and write workspace files", on: true },
+      { id: "shell", name: "Shell", desc: "Run shell commands in the sandbox", on: true },
+      { id: "github", name: "GitHub", desc: "Repos and GitHub API tools", on: true },
+    ];
+
+    function defaultSettings() {
+      return {
+        profileName: "chisom odoh",
+        profileEmail: "polycapsamuel5@gmail.com",
+        profileInitials: "CO",
+        autoReview: false,
+        autoReviewRules: [],
+        tzAuto: true,
+        timeZone: "Africa/Lagos",
+        notifications: true,
+        appearance: "Black",
+        language: "System",
+        haptics: true,
+        plugins: DEFAULT_PLUGINS.map((p) => Object.assign({}, p)),
+      };
+    }
+
+    let settings = defaultSettings();
+    let appVersion = "0.2.8";
+    let botsSearchQuery = "";
+    let searchOpen = false;
+    let ctxBotId = null;
+    let ctxMoreOpen = false;
+    let longPressTimer = null;
+    let suppressBotClick = false;
+
+    function loadSettings() {
+      try {
+        const raw = localStorage.getItem(SETTINGS_KEY);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          settings = Object.assign(defaultSettings(), parsed || {});
+          if (!Array.isArray(settings.autoReviewRules)) settings.autoReviewRules = [];
+          if (!Array.isArray(settings.plugins) || !settings.plugins.length) {
+            settings.plugins = DEFAULT_PLUGINS.map((p) => Object.assign({}, p));
+          }
+          return;
+        }
+      } catch (_) {}
+      settings = defaultSettings();
+      saveSettings();
+    }
+
+    function saveSettings() {
+      try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch (_) {}
+    }
+
+    function haptic(ms) {
+      if (!settings.haptics) return;
+      try { if (navigator.vibrate) navigator.vibrate(ms || 12); } catch (_) {}
+    }
+
+    function showAppToast(msg) {
+      const el = document.getElementById("app-toast");
+      if (!el) return;
+      el.textContent = msg;
+      el.classList.add("show");
+      clearTimeout(showAppToast._t);
+      showAppToast._t = setTimeout(() => el.classList.remove("show"), 2200);
+    }
+
+    function setToggle(el, on) {
+      if (!el) return;
+      el.classList.toggle("on", !!on);
+      el.setAttribute("aria-pressed", on ? "true" : "false");
+    }
+
+    function calcUsagePct() {
+      let msgs = 0;
+      bots.forEach((b) => { msgs += (b.messages && b.messages.length) || 0; });
+      return Math.max(8, Math.min(98, Math.round((msgs / 80) * 100) || 12));
+    }
+
+    function applyAppearance() {
+      const a = settings.appearance || "Black";
+      const root = document.documentElement;
+      const body = document.body;
+      if (a === "System") {
+        const dark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+        body.style.background = dark ? "#000" : "#f2f2f7";
+        body.style.color = dark ? "#f5f5f7" : "#1c1c1e";
+      } else if (a === "Dark") {
+        body.style.background = "#0a0a0a";
+        body.style.color = "#f5f5f7";
+      } else {
+        body.style.background = "#000";
+        body.style.color = "#f5f5f7";
+      }
+    }
+
+    function profileNav(stack) {
+      document.querySelectorAll(".profile-stack").forEach((s) => {
+        s.classList.toggle("active", s.dataset.stack === stack);
+      });
+      const titles = {
+        main: "Profile", usage: "Usage", plugins: "Plugins", rules: "Auto-review Rules",
+        appearance: "Appearance", help: "Help Center", privacy: "Privacy Policy",
+        terms: "Terms of Service", feedback: "Send Feedback", hidden: "Hidden",
+      };
+      const t = document.getElementById("profile-title");
+      if (t) t.textContent = titles[stack] || "Profile";
+      if (stack === "plugins") renderPluginsList();
+      if (stack === "rules") renderRulesList();
+      if (stack === "appearance") renderAppearanceOpts();
+      if (stack === "hidden") renderHiddenList();
+      if (stack === "usage") renderProfileMain();
+    }
+
+    function openProfileSheet() {
+      closeBotsMenu();
+      closeBotCtx();
+      renderProfileMain();
+      profileNav("main");
+      const sheet = document.getElementById("profile-sheet");
+      sheet.hidden = false;
+      sheet.classList.add("show");
+      haptic(8);
+    }
+
+    function closeProfileSheet() {
+      const sheet = document.getElementById("profile-sheet");
+      sheet.classList.remove("show");
+      sheet.hidden = true;
+      profileNav("main");
+    }
+
+    function updateTzControls() {
+      const sel = document.getElementById("ps-tz-select");
+      const disp = document.getElementById("ps-tz-display");
+      if (!sel || !disp) return;
+      if (settings.tzAuto) {
+        sel.style.display = "none";
+        disp.style.display = "";
+        disp.textContent = settings.timeZone || "Africa/Lagos";
+      } else {
+        disp.style.display = "none";
+        sel.style.display = "";
+        if (!sel.options.length) {
+          TIMEZONES.forEach((z) => {
+            const o = document.createElement("option");
+            o.value = z; o.textContent = z;
+            sel.appendChild(o);
+          });
+        }
+        sel.value = TIMEZONES.includes(settings.timeZone) ? settings.timeZone : "Africa/Lagos";
+      }
+    }
+
+    function renderProfileMain() {
+      const av = document.getElementById("ps-avatar");
+      const nm = document.getElementById("ps-name");
+      const em = document.getElementById("ps-email");
+      if (av) av.textContent = settings.profileInitials || "CO";
+      if (nm) nm.textContent = settings.profileName || "chisom odoh";
+      if (em) em.textContent = settings.profileEmail || "";
+      const pct = calcUsagePct();
+      const bar = document.getElementById("ps-usage-bar");
+      const pctEl = document.getElementById("ps-usage-pct");
+      if (bar) bar.style.width = pct + "%";
+      if (pctEl) pctEl.textContent = pct + "%";
+      const bar2 = document.getElementById("ps-usage-bar-2");
+      const pct2 = document.getElementById("ps-usage-pct-2");
+      if (bar2) bar2.style.width = pct + "%";
+      if (pct2) pct2.textContent = pct + "%";
+      setToggle(document.getElementById("ps-auto-review"), settings.autoReview);
+      setToggle(document.getElementById("ps-tz-auto"), settings.tzAuto);
+      setToggle(document.getElementById("ps-notifications"), settings.notifications);
+      setToggle(document.getElementById("ps-haptics"), settings.haptics);
+      const rc = document.getElementById("ps-rules-count");
+      if (rc) rc.textContent = String((settings.autoReviewRules || []).length);
+      const ap = document.getElementById("ps-appearance-val");
+      if (ap) ap.textContent = settings.appearance || "Black";
+      const ver = document.getElementById("ps-version");
+      if (ver) ver.textContent = "nitc-agent " + appVersion;
+      const ua = document.getElementById("btn-user-menu");
+      if (ua) ua.textContent = settings.profileInitials || "CO";
+      updateTzControls();
+    }
+
+    function renderPluginsList() {
+      const host = document.getElementById("ps-plugins-list");
+      if (!host) return;
+      host.innerHTML = "";
+      (settings.plugins || []).forEach((p, idx) => {
+        const row = document.createElement("div");
+        row.className = "ps-plugin-row";
+        row.innerHTML = '<div class="pl-meta"><div class="pl-name"></div><div class="pl-desc"></div></div>';
+        row.querySelector(".pl-name").textContent = p.name;
+        row.querySelector(".pl-desc").textContent = p.desc || "";
+        const tog = document.createElement("button");
+        tog.type = "button";
+        tog.className = "nitc-toggle" + (p.on ? " on" : "");
+        tog.setAttribute("aria-pressed", p.on ? "true" : "false");
+        tog.addEventListener("click", () => {
+          settings.plugins[idx].on = !settings.plugins[idx].on;
+          saveSettings();
+          haptic(8);
+          renderPluginsList();
+        });
+        row.appendChild(tog);
+        host.appendChild(row);
+      });
+    }
+
+    function renderRulesList() {
+      const ul = document.getElementById("ps-rules-list");
+      if (!ul) return;
+      ul.innerHTML = "";
+      const rules = settings.autoReviewRules || [];
+      if (!rules.length) {
+        const empty = document.createElement("li");
+        empty.innerHTML = '<span class="rtxt" style="color:var(--muted)">No rules yet</span>';
+        ul.appendChild(empty);
+      }
+      rules.forEach((rule, i) => {
+        const li = document.createElement("li");
+        const span = document.createElement("span");
+        span.className = "rtxt";
+        span.textContent = rule;
+        const del = document.createElement("button");
+        del.type = "button";
+        del.className = "rdel";
+        del.textContent = "Delete";
+        del.addEventListener("click", () => {
+          settings.autoReviewRules.splice(i, 1);
+          saveSettings();
+          document.getElementById("ps-rules-count").textContent = String(settings.autoReviewRules.length);
+          renderRulesList();
+        });
+        li.appendChild(span);
+        li.appendChild(del);
+        ul.appendChild(li);
+      });
+    }
+
+    function renderAppearanceOpts() {
+      document.querySelectorAll("#ps-appearance-opts [data-appearance]").forEach((btn) => {
+        const check = btn.querySelector("[data-check]");
+        const on = btn.dataset.appearance === settings.appearance;
+        if (check) check.textContent = on ? "✓" : "";
+      });
+    }
+
+    function renderHiddenList() {
+      const host = document.getElementById("ps-hidden-list");
+      if (!host) return;
+      host.innerHTML = "";
+      const hidden = bots.filter((b) => b.hidden);
+      if (!hidden.length) {
+        const row = document.createElement("div");
+        row.className = "ps-row static";
+        row.innerHTML = '<span class="ps-label"><span class="s">No hidden bots</span></span>';
+        host.appendChild(row);
+        return;
+      }
+      hidden.forEach((bot) => {
+        const row = document.createElement("button");
+        row.type = "button";
+        row.className = "ps-row";
+        row.innerHTML = '<span class="ps-label"><span class="t"></span><span class="s">Tap to unhide</span></span>';
+        row.querySelector(".t").textContent = bot.name;
+        row.addEventListener("click", () => {
+          bot.hidden = false;
+          saveBots();
+          renderBotsList();
+          renderHiddenList();
+          showAppToast("Unhid " + bot.name);
+        });
+        host.appendChild(row);
+      });
+    }
+
+    function initProfileUI() {
+      document.getElementById("profile-close").addEventListener("click", closeProfileSheet);
+      document.querySelectorAll("[data-nav]").forEach((btn) => {
+        btn.addEventListener("click", () => profileNav(btn.dataset.nav));
+      });
+      document.querySelectorAll("[data-back]").forEach((btn) => {
+        btn.addEventListener("click", () => profileNav("main"));
+      });
+      document.getElementById("ps-usage-row").addEventListener("click", () => profileNav("usage"));
+
+      function wireToggle(id, key) {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.addEventListener("click", () => {
+          settings[key] = !settings[key];
+          saveSettings();
+          setToggle(el, settings[key]);
+          haptic(10);
+          if (key === "tzAuto") updateTzControls();
+        });
+      }
+      wireToggle("ps-auto-review", "autoReview");
+      wireToggle("ps-tz-auto", "tzAuto");
+      wireToggle("ps-notifications", "notifications");
+      wireToggle("ps-haptics", "haptics");
+
+      document.getElementById("ps-tz-select").addEventListener("change", (e) => {
+        settings.timeZone = e.target.value;
+        saveSettings();
+        document.getElementById("ps-tz-display").textContent = settings.timeZone;
+      });
+
+      document.getElementById("ps-bot-computer").addEventListener("click", () => {
+        closeProfileSheet();
+        setView("computer");
+      });
+
+      document.querySelectorAll("#ps-appearance-opts [data-appearance]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          settings.appearance = btn.dataset.appearance;
+          saveSettings();
+          applyAppearance();
+          renderAppearanceOpts();
+          document.getElementById("ps-appearance-val").textContent = settings.appearance;
+          haptic(8);
+        });
+      });
+
+      document.getElementById("ps-rule-add").addEventListener("click", () => {
+        const inp = document.getElementById("ps-rule-input");
+        const v = (inp.value || "").trim();
+        if (!v) return;
+        settings.autoReviewRules.push(v);
+        saveSettings();
+        inp.value = "";
+        document.getElementById("ps-rules-count").textContent = String(settings.autoReviewRules.length);
+        renderRulesList();
+        haptic(8);
+      });
+      document.getElementById("ps-rule-input").addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          document.getElementById("ps-rule-add").click();
+        }
+      });
+
+      document.getElementById("ps-feedback-send").addEventListener("click", async () => {
+        const textVal = (document.getElementById("ps-feedback-text").value || "").trim();
+        if (!textVal) { showAppToast("Write some feedback first"); return; }
+        try {
+          const r = await fetch("/api/feedback", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              message: textVal,
+              email: settings.profileEmail,
+              name: settings.profileName,
+              version: appVersion,
+            }),
+          });
+          if (!r.ok) {
+            const d = await r.json().catch(() => ({}));
+            throw new Error(d.detail || ("Error " + r.status));
+          }
+          document.getElementById("ps-feedback-text").value = "";
+          showAppToast("Feedback sent");
+          haptic(15);
+        } catch (err) {
+          showAppToast("Could not send: " + (err.message || err));
+        }
+      });
+
+      document.getElementById("ps-sign-out").addEventListener("click", () => {
+        if (!confirm("Sign out locally? Clears session tokens in this browser and returns to bots list.")) return;
+        try {
+          Object.keys(localStorage).forEach((k) => {
+            if (/token|session|auth|jwt/i.test(k) && k !== STORAGE_KEY && k !== SETTINGS_KEY) {
+              localStorage.removeItem(k);
+            }
+          });
+          sessionStorage.clear();
+        } catch (_) {}
+        closeProfileSheet();
+        setView("bots");
+        showAppToast("Signed out (local)");
+        haptic(20);
+      });
+
+      document.getElementById("ps-user-edit").addEventListener("click", () => {
+        const name = prompt("Display name", settings.profileName || "");
+        if (name === null) return;
+        const email = prompt("Email", settings.profileEmail || "");
+        if (email === null) return;
+        settings.profileName = (name || "").trim() || settings.profileName;
+        settings.profileEmail = (email || "").trim() || settings.profileEmail;
+        const parts = settings.profileName.split(/\s+/).filter(Boolean);
+        settings.profileInitials = ((parts[0] || "C")[0] + (parts[1] || "O")[0]).toUpperCase();
+        saveSettings();
+        renderProfileMain();
+      });
+    }
+
+    function toggleBotsSearch() {
+      searchOpen = !searchOpen;
+      const row = document.getElementById("bots-search-row");
+      row.classList.toggle("show", searchOpen);
+      if (searchOpen) {
+        document.getElementById("bots-search-input").focus();
+      } else {
+        botsSearchQuery = "";
+        document.getElementById("bots-search-input").value = "";
+        renderBotsList();
+      }
+    }
+
+    function closeBotCtx() {
+      const bd = document.getElementById("bot-ctx-backdrop");
+      if (!bd) return;
+      bd.classList.remove("show");
+      bd.hidden = true;
+      ctxBotId = null;
+      ctxMoreOpen = false;
+      document.getElementById("bot-ctx-more")?.classList.remove("show");
+      document.getElementById("ctx-more-chev")?.classList.remove("open");
+    }
+
+    function openBotCtx(botId) {
+      const bot = bots.find((b) => b.id === botId);
+      if (!bot) return;
+      ctxBotId = botId;
+      ctxMoreOpen = false;
+      document.getElementById("bot-ctx-more").classList.remove("show");
+      document.getElementById("ctx-more-chev").classList.remove("open");
+      const head = document.getElementById("bot-ctx-head");
+      head.innerHTML =
+        '<div class="bot-avatar">' + botAvatarSvg(bot.color) + "</div>" +
+        '<div class="nm"></div>';
+      head.querySelector(".nm").textContent = bot.name;
+      document.getElementById("bot-ctx-preview").textContent = bot.snippet || "No messages yet";
+      document.getElementById("ctx-unread-label").textContent = bot.unread ? "Mark Read" : "Mark Unread";
+      document.getElementById("ctx-pin-label").textContent = bot.pinned ? "Unpin" : "Pin";
+      document.getElementById("ctx-hide-label").textContent = bot.hidden ? "Unhide" : "Hide";
+      const bd = document.getElementById("bot-ctx-backdrop");
+      bd.hidden = false;
+      bd.classList.add("show");
+      haptic(18);
+    }
+
+    function getCtxBot() {
+      return bots.find((b) => b.id === ctxBotId) || null;
+    }
+
+    function bindBotRowLongPress(row, botId) {
+      const start = (e) => {
+        if (e.pointerType === "mouse" && e.button !== 0) return;
+        clearTimeout(longPressTimer);
+        longPressTimer = setTimeout(() => {
+          longPressTimer = null;
+          suppressBotClick = true;
+          openBotCtx(botId);
+        }, 400);
+      };
+      const cancel = () => {
+        clearTimeout(longPressTimer);
+        longPressTimer = null;
+      };
+      row.addEventListener("pointerdown", start);
+      row.addEventListener("pointerup", cancel);
+      row.addEventListener("pointercancel", cancel);
+      row.addEventListener("pointerleave", cancel);
+      row.addEventListener("pointermove", (e) => {
+        // cancel if dragged more than a few px from start — simple cancel on any move
+        if (longPressTimer && (Math.abs(e.movementX) > 3 || Math.abs(e.movementY) > 3)) cancel();
+      });
+      row.addEventListener("contextmenu", (e) => {
+        e.preventDefault();
+        openBotCtx(botId);
+      });
+    }
+
+    function initBotCtxUI() {
+      document.getElementById("bot-ctx-backdrop").addEventListener("click", (e) => {
+        if (e.target.id === "bot-ctx-backdrop") closeBotCtx();
+      });
+      document.getElementById("ctx-more-toggle").addEventListener("click", () => {
+        ctxMoreOpen = !ctxMoreOpen;
+        document.getElementById("bot-ctx-more").classList.toggle("show", ctxMoreOpen);
+        document.getElementById("ctx-more-chev").classList.toggle("open", ctxMoreOpen);
+      });
+      document.getElementById("ctx-unread").addEventListener("click", () => {
+        const bot = getCtxBot();
+        if (!bot) return;
+        bot.unread = !bot.unread;
+        saveBots();
+        renderBotsList();
+        closeBotCtx();
+        showAppToast(bot.unread ? "Marked unread" : "Marked read");
+      });
+      document.getElementById("ctx-pin").addEventListener("click", () => {
+        const bot = getCtxBot();
+        if (!bot) return;
+        bot.pinned = !bot.pinned;
+        bot.pinnedAt = bot.pinned ? Date.now() : 0;
+        saveBots();
+        renderBotsList();
+        closeBotCtx();
+        showAppToast(bot.pinned ? "Pinned" : "Unpinned");
+      });
+      document.getElementById("ctx-section").addEventListener("click", () => {
+        const bot = getCtxBot();
+        if (!bot) return;
+        const name = prompt("Section name", bot.section || "");
+        if (name === null) return;
+        bot.section = (name || "").trim();
+        saveBots();
+        renderBotsList();
+        closeBotCtx();
+        showAppToast(bot.section ? ("Moved to " + bot.section) : "Removed from section");
+      });
+      document.getElementById("ctx-share").addEventListener("click", async () => {
+        const bot = getCtxBot();
+        if (!bot) return;
+        const tmpl = {
+          type: "nitc-bot-template",
+          version: 1,
+          name: bot.name,
+          kind: bot.kind || "bot",
+          color: bot.color,
+          systemPrompt: bot.systemPrompt || "",
+          settings: { section: bot.section || "" },
+          exportedAt: new Date().toISOString(),
+        };
+        const json = JSON.stringify(tmpl, null, 2);
+        let copied = false;
+        try { await navigator.clipboard.writeText(json); copied = true; } catch (_) {}
+        try {
+          const blob = new Blob([json], { type: "application/json" });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = (bot.name || "bot").replace(/\s+/g, "-").toLowerCase() + "-template.json";
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          setTimeout(() => URL.revokeObjectURL(url), 1000);
+        } catch (_) {}
+        closeBotCtx();
+        showAppToast(copied ? "Template copied + downloaded" : "Template downloaded");
+      });
+      document.getElementById("ctx-hide").addEventListener("click", () => {
+        const bot = getCtxBot();
+        if (!bot) return;
+        bot.hidden = !bot.hidden;
+        saveBots();
+        renderBotsList();
+        closeBotCtx();
+        showAppToast(bot.hidden ? "Hidden — unhide from Profile" : "Unhid");
+      });
+      document.getElementById("ctx-copy-id").addEventListener("click", async () => {
+        const bot = getCtxBot();
+        if (!bot) return;
+        try { await navigator.clipboard.writeText(bot.id); showAppToast("Copied ID"); }
+        catch (_) { showAppToast(bot.id); }
+        closeBotCtx();
+      });
+      document.getElementById("ctx-duplicate").addEventListener("click", () => {
+        const bot = getCtxBot();
+        if (!bot) return;
+        const clone = {
+          id: uid(),
+          name: bot.name + " Copy",
+          kind: bot.kind || "bot",
+          color: bot.color,
+          snippet: bot.snippet || "Duplicated",
+          updatedAt: Date.now(),
+          messages: [],
+          pinned: false,
+          unread: false,
+          hidden: false,
+          section: bot.section || "",
+          systemPrompt: bot.systemPrompt || "",
+        };
+        bots.unshift(clone);
+        saveBots();
+        renderBotsList();
+        closeBotCtx();
+        showAppToast("Duplicated");
+        haptic(12);
+      });
+      document.getElementById("ctx-delete").addEventListener("click", () => {
+        const bot = getCtxBot();
+        if (!bot) return;
+        if (!confirm('Delete "' + bot.name + '" and its chat history?')) return;
+        bots = bots.filter((b) => b.id !== bot.id);
+        if (activeBotId === bot.id) {
+          activeBotId = null;
+          history = [];
+        }
+        saveBots();
+        renderBotsList();
+        closeBotCtx();
+        setView("bots");
+        showAppToast("Deleted");
+      });
+    }
+
+    function initBotsChrome() {
+      document.getElementById("btn-bots-search")?.addEventListener("click", toggleBotsSearch);
+      document.getElementById("bots-search-input")?.addEventListener("input", (e) => {
+        botsSearchQuery = e.target.value || "";
+        renderBotsList();
+      });
+    }
+
+
+    loadSettings();
+    applyAppearance();
+    initProfileUI();
+    initBotCtxUI();
+    initBotsChrome();
     loadBots();
     renderBotsList();
     loadConfig();
     refreshHealth();
     setInterval(refreshHealth, 30000);
     updateSendMode();
+    autoResize();
     setView("bots");
   </script>
+
+  <!-- PROFILE SETTINGS SHEET -->
+  <div class="profile-sheet" id="profile-sheet" role="dialog" aria-modal="true" aria-labelledby="profile-title" hidden>
+    <div class="profile-head">
+      <button type="button" class="profile-close" id="profile-close" aria-label="Close">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+      <h1 id="profile-title">Profile</h1>
+    </div>
+    <div class="profile-body">
+      <div class="profile-stack active" data-stack="main" id="ps-main">
+        <div class="ps-card">
+          <div class="ps-user" id="ps-user-edit" title="Tap to edit">
+            <div class="av" id="ps-avatar">CO</div>
+            <div>
+              <div class="nm" id="ps-name">chisom odoh</div>
+              <div class="em" id="ps-email">polycapsamuel5@gmail.com</div>
+            </div>
+          </div>
+          <div class="ps-usage" id="ps-usage-row" role="button" tabindex="0">
+            <div class="bar-wrap">
+              <div class="bar-lbl">Usage</div>
+              <div class="bar"><i id="ps-usage-bar" style="width:62%"></i></div>
+            </div>
+            <div class="pct" id="ps-usage-pct">62%</div>
+            <span class="ps-chev">›</span>
+          </div>
+        </div>
+        <div class="ps-card">
+          <button type="button" class="ps-row" data-nav="plugins">
+            <span class="ps-label"><span class="t">Plugins</span><span class="s">Tools and skills for Animal Nitc</span></span>
+            <span class="ps-chev">›</span>
+          </button>
+        </div>
+        <div class="ps-sec">Bot</div>
+        <div class="ps-card">
+          <div class="ps-row static">
+            <span class="ps-label"><span class="t">Auto-review</span><span class="s">Ask before risky shell, desktop, or network actions</span></span>
+            <button type="button" class="nitc-toggle" id="ps-auto-review" aria-label="Auto-review" aria-pressed="false"></button>
+          </div>
+          <button type="button" class="ps-row" data-nav="rules">
+            <span class="ps-label"><span class="t">Auto-review Rules</span></span>
+            <span class="badge-count" id="ps-rules-count">0</span>
+            <span class="ps-chev">›</span>
+          </button>
+          <div class="ps-row static">
+            <span class="ps-label"><span class="t">Set Time Zone Automatically</span></span>
+            <button type="button" class="nitc-toggle on" id="ps-tz-auto" aria-label="Auto timezone" aria-pressed="true"></button>
+          </div>
+          <div class="ps-row static" id="ps-tz-row">
+            <span class="ps-label"><span class="t">Time Zone</span></span>
+            <span class="ps-value" id="ps-tz-display">Africa/Lagos</span>
+            <select class="ps-select" id="ps-tz-select" style="display:none" aria-label="Time zone"></select>
+          </div>
+          <button type="button" class="ps-row" id="ps-bot-computer">
+            <span class="ps-label"><span class="t">Bot Computer</span><span class="s">Open the live desktop</span></span>
+            <span class="ps-chev">›</span>
+          </button>
+        </div>
+        <div class="ps-sec">More</div>
+        <div class="ps-card">
+          <div class="ps-row static">
+            <span class="ps-label"><span class="t">Notifications</span></span>
+            <button type="button" class="nitc-toggle on" id="ps-notifications" aria-label="Notifications" aria-pressed="true"></button>
+          </div>
+          <button type="button" class="ps-row" data-nav="appearance">
+            <span class="ps-label"><span class="t">Appearance</span></span>
+            <span class="ps-value" id="ps-appearance-val">Black</span>
+            <span class="ps-chev">›</span>
+          </button>
+          <div class="ps-row static">
+            <span class="ps-label"><span class="t">Language</span></span>
+            <span class="ps-value">System</span>
+          </div>
+          <div class="ps-row static">
+            <span class="ps-label"><span class="t">Haptics</span></span>
+            <button type="button" class="nitc-toggle on" id="ps-haptics" aria-label="Haptics" aria-pressed="true"></button>
+          </div>
+          <button type="button" class="ps-row" data-nav="help">
+            <span class="ps-label"><span class="t">Help Center</span></span>
+            <span class="ps-chev">›</span>
+          </button>
+          <button type="button" class="ps-row" data-nav="privacy">
+            <span class="ps-label"><span class="t">Privacy Policy</span></span>
+            <span class="ps-chev">›</span>
+          </button>
+          <button type="button" class="ps-row" data-nav="terms">
+            <span class="ps-label"><span class="t">Terms of Service</span></span>
+            <span class="ps-chev">›</span>
+          </button>
+          <button type="button" class="ps-row" data-nav="feedback">
+            <span class="ps-label"><span class="t">Send Feedback</span></span>
+            <span class="ps-chev">›</span>
+          </button>
+          <button type="button" class="ps-row" data-nav="hidden">
+            <span class="ps-label"><span class="t">Hidden bots</span></span>
+            <span class="ps-chev">›</span>
+          </button>
+          <button type="button" class="ps-row danger" id="ps-sign-out">
+            <span class="ps-label"><span class="t">Sign Out</span></span>
+          </button>
+        </div>
+        <div class="ps-footer">
+          <div class="brand">Animal Nitc</div>
+          <div id="ps-version">nitc-agent</div>
+        </div>
+      </div>
+
+      <div class="profile-stack" data-stack="usage">
+        <button type="button" class="ps-sub-back" data-back>‹ Back</button>
+        <div class="ps-card" style="padding:16px">
+          <div style="font-weight:700;margin-bottom:8px">Local usage</div>
+          <p class="ps-md" style="padding:0">This meter is a local estimate based on messages stored in this browser for your bots. It is not a cloud quota.</p>
+          <div class="ps-usage" style="border:none;padding:8px 0 0;cursor:default">
+            <div class="bar-wrap">
+              <div class="bar-lbl">Estimated local activity</div>
+              <div class="bar"><i id="ps-usage-bar-2" style="width:62%"></i></div>
+            </div>
+            <div class="pct" id="ps-usage-pct-2">62%</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="profile-stack" data-stack="plugins">
+        <button type="button" class="ps-sub-back" data-back>‹ Back</button>
+        <div class="ps-sec" style="margin-top:0">Tools and skills for Animal Nitc</div>
+        <div class="ps-card" id="ps-plugins-list"></div>
+      </div>
+
+      <div class="profile-stack" data-stack="rules">
+        <button type="button" class="ps-sub-back" data-back>‹ Back</button>
+        <div class="ps-sec" style="margin-top:0">Auto-review Rules</div>
+        <div class="ps-card">
+          <ul class="ps-rule-list" id="ps-rules-list"></ul>
+          <div class="ps-add-row">
+            <input type="text" id="ps-rule-input" placeholder="Add a rule…" maxlength="200" />
+            <button type="button" id="ps-rule-add">Add</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="profile-stack" data-stack="appearance">
+        <button type="button" class="ps-sub-back" data-back>‹ Back</button>
+        <div class="ps-sec" style="margin-top:0">Appearance</div>
+        <div class="ps-card" id="ps-appearance-opts">
+          <button type="button" class="ps-row" data-appearance="System"><span class="ps-label"><span class="t">System</span></span><span class="ps-value" data-check></span></button>
+          <button type="button" class="ps-row" data-appearance="Black"><span class="ps-label"><span class="t">Black</span></span><span class="ps-value" data-check></span></button>
+          <button type="button" class="ps-row" data-appearance="Dark"><span class="ps-label"><span class="t">Dark</span></span><span class="ps-value" data-check></span></button>
+        </div>
+      </div>
+
+      <div class="profile-stack" data-stack="help">
+        <button type="button" class="ps-sub-back" data-back>‹ Back</button>
+        <div class="ps-card" style="padding:16px">
+          <div class="ps-md">
+            <h3>Help Center</h3>
+            <p>Animal Nitc is a self-hosted agent with chat, files, shell, browser, GitHub, and a live desktop.</p>
+            <h3>Bots list</h3>
+            <p>Tap a bot to chat. Long-press a bot for Pin, Unread, Section, Duplicate, Delete, and more.</p>
+            <h3>Computer</h3>
+            <p>Open the monitor icon in chat to watch and control the desktop.</p>
+            <h3>Profile</h3>
+            <p>Tap your CO avatar on the bots home to open settings. Preferences stay in this browser via localStorage.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="profile-stack" data-stack="privacy">
+        <button type="button" class="ps-sub-back" data-back>‹ Back</button>
+        <div class="ps-card" style="padding:16px">
+          <div class="ps-md">
+            <h3>Privacy Policy</h3>
+            <p>Placeholder. Chat history and settings for this UI are stored locally in your browser. Server-side jobs and workspace files live on your nitc-agent host.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="profile-stack" data-stack="terms">
+        <button type="button" class="ps-sub-back" data-back>‹ Back</button>
+        <div class="ps-card" style="padding:16px">
+          <div class="ps-md">
+            <h3>Terms of Service</h3>
+            <p>Placeholder. Use Animal Nitc / nitc-agent at your own risk on systems you own or administer.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="profile-stack" data-stack="feedback">
+        <button type="button" class="ps-sub-back" data-back>‹ Back</button>
+        <div class="ps-sec" style="margin-top:0">Send Feedback</div>
+        <div class="ps-card" style="padding:14px">
+          <textarea class="ps-feedback-ta" id="ps-feedback-text" placeholder="What should we improve?"></textarea>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button type="button" class="ps-btn" id="ps-feedback-send">Send</button>
+            <a class="ps-btn secondary" href="mailto:polycapsamuel5@gmail.com?subject=Animal%20Nitc%20feedback">Email</a>
+          </div>
+        </div>
+      </div>
+
+      <div class="profile-stack" data-stack="hidden">
+        <button type="button" class="ps-sub-back" data-back>‹ Back</button>
+        <div class="ps-sec" style="margin-top:0">Hidden bots</div>
+        <div class="ps-card" id="ps-hidden-list"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- BOT LONG-PRESS CONTEXT MENU -->
+  <div class="bot-ctx-backdrop" id="bot-ctx-backdrop" hidden>
+    <div class="bot-ctx-card" role="menu">
+      <div class="bot-ctx-head" id="bot-ctx-head"></div>
+      <div class="bot-ctx-preview" id="bot-ctx-preview"></div>
+      <div class="bot-ctx-actions">
+        <button type="button" id="ctx-unread"><span class="mi">●</span><span id="ctx-unread-label">Mark Unread</span></button>
+        <button type="button" id="ctx-pin"><span class="mi">📌</span><span id="ctx-pin-label">Pin</span></button>
+        <button type="button" id="ctx-section"><span class="mi">📁</span>New Section</button>
+        <button type="button" id="ctx-share"><span class="mi">⇧</span>Share as Template</button>
+        <button type="button" class="danger" id="ctx-hide"><span class="mi">◉</span><span id="ctx-hide-label">Hide</span></button>
+        <button type="button" id="ctx-more-toggle"><span class="mi">⋯</span>More<span class="chev" id="ctx-more-chev">›</span></button>
+        <div class="bot-ctx-more" id="bot-ctx-more">
+          <button type="button" id="ctx-copy-id"><span class="mi">ID</span>Copy ID</button>
+          <button type="button" id="ctx-duplicate"><span class="mi">⧉</span>Duplicate</button>
+          <button type="button" class="danger" id="ctx-delete"><span class="mi">⌫</span>Delete</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="app-toast" id="app-toast" role="status"></div>
+
 </body>
 </html>

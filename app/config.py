@@ -25,6 +25,9 @@ class Settings(BaseSettings):
     max_tool_rounds: int = 15
     shell_timeout_seconds: int = 60
 
+    # Parallel agent job workers (FIFO queue; never cancel in-flight)
+    nitc_job_concurrency: int = 2
+
     workspace_dir: str = "/app/workspace"
 
     # Phase 2 — interactive desktop

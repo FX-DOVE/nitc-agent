@@ -22,6 +22,10 @@ _SAFE_ID = re.compile(r"^[A-Za-z0-9_.:-]{1,128}$")
 _lock = threading.RLock()
 _running: dict[str, asyncio.Task] = {}
 _started = False
+_workers_started = False
+_job_queue: asyncio.Queue[str] | None = None
+_queued_ids: set[str] = set()
+_dispatcher_task: asyncio.Task | None = None
 
 
 def jobs_root() -> Path:
@@ -288,6 +292,14 @@ async def _run_job(job_id: str) -> None:
     if job.get("status") in ("completed", "failed", "cancelled"):
         return
 
+    # Track for pool_stats / UI; worker already owns exclusivity via queue
+    try:
+        task = asyncio.current_task()
+        if task is not None:
+            _running[job_id] = task
+    except Exception:  # noqa: BLE001
+        pass
+
     job["status"] = "running"
     job["started_at"] = _now()
     append_event(job, "running", message="Agent loop started")
@@ -340,20 +352,75 @@ async def _run_job(job_id: str) -> None:
         _running.pop(job_id, None)
 
 
+def job_concurrency() -> int:
+    try:
+        n = int(get_settings().nitc_job_concurrency)
+    except Exception:  # noqa: BLE001
+        n = 2
+    return max(1, min(8, n))
+
+
+async def _worker_loop(worker_id: int) -> None:
+    assert _job_queue is not None
+    logger.info("job worker %s started (concurrency pool)", worker_id)
+    while True:
+        job_id = await _job_queue.get()
+        try:
+            with _lock:
+                _queued_ids.discard(job_id)
+            await _run_job(job_id)
+        except Exception:  # noqa: BLE001
+            logger.exception("worker %s crashed on job %s", worker_id, job_id)
+        finally:
+            _job_queue.task_done()
+
+
+async def ensure_worker_pool() -> None:
+    """Start FIFO worker pool once per process."""
+    global _workers_started, _job_queue
+    if _workers_started and _job_queue is not None:
+        return
+    n = job_concurrency()
+    _job_queue = asyncio.Queue()
+    for i in range(n):
+        asyncio.create_task(_worker_loop(i), name=f"nitc-worker-{i}")
+    _workers_started = True
+    logger.info("job worker pool ready: %s concurrent", n)
+
+
 def enqueue_job(job_id: str) -> None:
-    """Schedule background execution on the running event loop."""
+    """Queue a job for the worker pool. Never cancels in-flight jobs."""
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:
         logger.error("enqueue_job called with no running loop for %s", job_id)
         return
 
-    existing = _running.get(job_id)
-    if existing and not existing.done():
-        return
+    async def _put() -> None:
+        await ensure_worker_pool()
+        assert _job_queue is not None
+        with _lock:
+            # Already running or already waiting in queue — do not duplicate
+            existing = _running.get(job_id)
+            if existing and not existing.done():
+                return
+            if job_id in _queued_ids:
+                return
+            _queued_ids.add(job_id)
+        await _job_queue.put(job_id)
 
-    task = loop.create_task(_run_job(job_id), name=f"nitc-job-{job_id}")
-    _running[job_id] = task
+    loop.create_task(_put(), name=f"nitc-enqueue-{job_id}")
+
+
+def pool_stats() -> dict[str, Any]:
+    running = sum(1 for t in _running.values() if t and not t.done())
+    queued = len(_queued_ids)
+    return {
+        "concurrency": job_concurrency(),
+        "running": running,
+        "queued": queued,
+        "workers_started": _workers_started,
+    }
 
 
 async def recover_queued_jobs() -> None:
@@ -362,9 +429,12 @@ async def recover_queued_jobs() -> None:
     if _started:
         return
     _started = True
+    await ensure_worker_pool()
     root = jobs_root()
     recovered = 0
-    for path in root.glob("*.json"):
+    # FIFO by created_at / mtime ascending so oldest runs first
+    paths = sorted(root.glob("*.json"), key=lambda p: p.stat().st_mtime)
+    for path in paths:
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
@@ -375,7 +445,6 @@ async def recover_queued_jobs() -> None:
         job_id = data.get("id")
         if not job_id or status not in ("queued", "running"):
             continue
-        # Mark interrupted runs as queued again
         if status == "running":
             data["status"] = "queued"
             data["error"] = "Recovered after server restart"
