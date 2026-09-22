@@ -6,49 +6,47 @@
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <meta name="theme-color" content="#111827" />
-  <title>Nitc Agent</title>
+  <meta name="theme-color" content="#000000" />
+  <title>Animal Nitc</title>
   <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js" crossorigin="anonymous"></script>
   <style>
     :root {
-      --bg: #111827;
-      --bg-elevated: #0f1623;
-      --sidebar: #0c1220;
-      --panel: #1f2937;
-      --border: #2a3444;
-      --border-soft: #1c2433;
-      --text: #f3f4f6;
-      --text-secondary: #9ca3af;
-      --muted: #6b7280;
-      --accent: #3b82f6;
-      --accent-soft: rgba(59, 130, 246, 0.16);
-      --accent-hover: #60a5fa;
-      --user-bg: #1e3a5f;
-      --assistant-bg: #1f2937;
-      --avatar-purple: #7c3aed;
-      --danger: #ff6b7a;
-      --ok: #5ddea3;
-      --radius: 22px;
-      --radius-sm: 12px;
-      --shadow: 0 8px 28px rgba(0, 0, 0, 0.4);
-      --font: "Inter", "SF Pro Text", "Segoe UI", system-ui, -apple-system, sans-serif;
+      --bg: #000000;
+      --bg-elevated: #0a0a0a;
+      --surface: #1c1c1e;
+      --surface-2: #2c2c2e;
+      --surface-pill: rgba(44, 44, 46, 0.92);
+      --border: #2c2c2e;
+      --text: #f5f5f7;
+      --text-secondary: #a1a1a6;
+      --muted: #6e6e73;
+      --green: #34c759;
+      --green-soft: #3ddc84;
+      --teardrop: #34c759;
+      --danger: #ff453a;
+      --ok: #34c759;
+      --radius-bubble: 22px;
+      --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
       --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-      --sidebar-w: 260px;
+      --btn-size: 40px;
+      --safe-top: env(safe-area-inset-top, 0px);
+      --safe-bottom: env(safe-area-inset-bottom, 0px);
     }
     *, *::before, *::after { box-sizing: border-box; }
-    img, iframe, video { max-width: 100%; height: auto; }
-    img { display: block; }
+    img, iframe, video { max-width: 100%; }
+    img { display: block; height: auto; }
     html, body {
       margin: 0;
       width: 100%;
       max-width: 100%;
       height: 100%;
       height: 100dvh;
-      background: var(--bg); color: var(--text);
+      background: var(--bg);
+      color: var(--text);
       font-family: var(--font);
-      font-size: 15px;
-      line-height: 1.5;
+      font-size: 16px;
+      line-height: 1.45;
       -webkit-font-smoothing: antialiased;
       -webkit-text-size-adjust: 100%;
       text-size-adjust: 100%;
@@ -60,131 +58,125 @@
       inset: 0;
     }
     button, textarea { font: inherit; color: inherit; }
-    a { color: var(--accent-hover); text-decoration: none; }
+    a { color: var(--green-soft); text-decoration: none; }
     a:hover { text-decoration: underline; }
 
     .app {
-      display: grid;
-      grid-template-columns: var(--sidebar-w) 1fr;
+      display: flex;
+      flex-direction: column;
       width: 100%;
       max-width: 100vw;
       height: 100%;
       height: 100dvh;
       overflow: hidden;
       overflow-x: hidden;
+      background: var(--bg);
       position: relative;
     }
 
-    .sidebar {
-      background: var(--sidebar);
-      border-right: 1px solid var(--border);
-      display: flex;
-      flex-direction: column;
-      padding: 16px 12px;
-      gap: 8px;
-      min-height: 0;
-    }
-    .brand {
-      display: flex; align-items: center; gap: 12px;
-      padding: 8px 10px 16px;
-    }
-    .brand-mark {
-      width: 36px; height: 36px; border-radius: 50%;
-      background: var(--avatar-purple);
-      display: grid; place-items: center;
-      font-weight: 700; font-size: 0.95rem; color: #fff;
-      box-shadow: 0 4px 14px rgba(124, 58, 237, 0.4);
+    /* —— Green teardrop logo —— */
+    .teardrop {
+      width: 22px;
+      height: 22px;
       flex-shrink: 0;
+      display: inline-block;
+      vertical-align: middle;
     }
-    .brand-text h1 {
-      margin: 0; font-size: 0.95rem; font-weight: 650;
-      letter-spacing: -0.02em;
-    }
-    .brand-text p {
-      margin: 2px 0 0; font-size: 0.72rem; color: var(--muted);
-    }
-    .nav-btn {
-      display: flex; align-items: center; gap: 10px;
-      width: 100%;
-      padding: 10px 12px;
-      border-radius: var(--radius-sm);
-      border: 1px solid transparent;
-      background: transparent;
-      color: var(--text-secondary);
-      cursor: pointer;
-      text-align: left;
-      transition: background .15s, color .15s, border-color .15s;
-    }
-    .nav-btn:hover {
-      background: var(--panel);
-      color: var(--text);
-    }
-    .nav-btn.active {
-      background: var(--accent-soft);
-      color: var(--text);
-      border-color: rgba(59, 130, 246, 0.28);
-    }
-    .nav-btn .ico {
-      width: 18px; height: 18px; opacity: 0.85; flex-shrink: 0;
-    }
-    .nav-btn.primary {
-      background: var(--panel);
-      border-color: var(--border);
-      color: var(--text);
-      margin-bottom: 4px;
-    }
-    .nav-btn.primary:hover {
-      border-color: var(--accent);
-      background: var(--accent-soft);
-    }
-    .sidebar-spacer { flex: 1; }
-    .sidebar-foot {
-      padding: 10px 12px;
-      border-top: 1px solid var(--border);
-      font-size: 0.75rem;
-      color: var(--muted);
-      display: flex; align-items: center; gap: 8px;
-    }
-    #status-dot {
-      width: 8px; height: 8px; border-radius: 50%;
-      background: var(--muted); flex-shrink: 0;
-    }
-    #status-dot.ok { background: var(--ok); box-shadow: 0 0 8px rgba(93, 222, 163, 0.5); }
-    #status-dot.err { background: var(--danger); }
+    .teardrop.lg { width: 28px; height: 28px; }
+    .teardrop.sm { width: 18px; height: 18px; }
 
-    .main {
-      display: flex; flex-direction: column;
-      min-width: 0; min-height: 0;
+    /* —— Circular icon button —— */
+    .icon-btn {
+      width: var(--btn-size);
+      height: var(--btn-size);
+      border-radius: 50%;
+      border: none;
+      background: var(--surface-pill);
+      color: var(--text);
+      cursor: pointer;
+      display: grid;
+      place-items: center;
+      flex-shrink: 0;
+      padding: 0;
+      transition: background .15s, transform .1s, opacity .15s;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .icon-btn:hover { background: var(--surface-2); }
+    .icon-btn:active { transform: scale(0.94); }
+    .icon-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .icon-btn.white {
+      background: #fff;
+      color: #000;
+    }
+    .icon-btn.white:hover { background: #e8e8ed; }
+    .icon-btn svg { display: block; }
+
+    /* —— Views —— */
+    .view {
+      display: none;
+      flex: 1;
+      min-height: 0;
+      min-width: 0;
+      flex-direction: column;
+      overflow: hidden;
       width: 100%;
       max-width: 100%;
-      overflow: hidden;
-      background: var(--bg);
     }
-    .view { display: none; flex: 1; min-height: 0; min-width: 0; flex-direction: column; overflow: hidden; }
     .view.active { display: flex; }
 
-    .chat-header {
-      display: flex; align-items: flex-start; gap: 12px;
+    /* —— Chat top bar —— */
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
       flex-shrink: 0;
-      padding: 14px 20px;
-      padding-top: max(14px, env(safe-area-inset-top));
-      border-bottom: 1px solid var(--border-soft);
-      background: rgba(17, 24, 39, 0.94);
-      backdrop-filter: blur(8px);
-      -webkit-backdrop-filter: blur(8px);
+      padding: 10px 14px;
+      padding-top: max(10px, var(--safe-top));
+      background: var(--bg);
+      z-index: 5;
     }
-    .chat-header .header-text { flex: 1; min-width: 0; }
-    .chat-header h2 {
-      margin: 0; font-size: 1.15rem; font-weight: 700;
+    .topbar-center {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      height: var(--btn-size);
+      padding: 0 16px 0 12px;
+      border-radius: 999px;
+      background: var(--surface-pill);
+      color: var(--text);
+      font-weight: 600;
+      font-size: 0.95rem;
+      letter-spacing: -0.01em;
+      max-width: min(220px, 55vw);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .topbar-spacer { width: var(--btn-size); flex-shrink: 0; }
+    .topbar-title-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex: 1;
+      min-width: 0;
+    }
+    .topbar-title-row .name {
+      font-weight: 600;
+      font-size: 1.05rem;
       letter-spacing: -0.02em;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
-    .chat-header .sub {
-      color: var(--text-secondary);
-      font-size: 0.78rem;
-      margin-top: 4px;
-      line-height: 1.35;
+    .topbar-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-shrink: 0;
     }
 
+    /* —— Messages —— */
     #messages {
       flex: 1 1 auto;
       min-height: 0;
@@ -192,15 +184,20 @@
       overflow-y: auto;
       -webkit-overflow-scrolling: touch;
       overscroll-behavior: contain;
-      padding: 20px 16px 12px;
-      display: flex; flex-direction: column; gap: 16px;
+      padding: 8px 16px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
       scroll-behavior: smooth;
       width: 100%;
       max-width: 100%;
     }
     .msg-row {
-      display: flex; gap: 10px; max-width: 820px; width: 100%;
-      margin: 0 auto;
+      display: flex;
+      gap: 0;
+      width: 100%;
+      max-width: 100%;
+      margin: 0;
       animation: fadeIn .2s ease;
       min-width: 0;
       align-items: flex-end;
@@ -209,55 +206,51 @@
       from { opacity: 0; transform: translateY(6px); }
       to { opacity: 1; transform: none; }
     }
-    .msg-row.user { flex-direction: row-reverse; }
-    .avatar {
-      width: 32px; height: 32px; border-radius: 50%;
-      flex-shrink: 0; display: grid; place-items: center;
-      font-size: 0.72rem; font-weight: 700;
-    }
-    .msg-row.user .avatar {
-      width: auto; height: auto; min-width: 28px; min-height: 28px;
-      padding: 4px 7px;
-      border-radius: 8px;
-      background: #1a2740;
-      border: 1px solid #2a3a58;
-      color: var(--accent-hover);
-      font-size: 0.65rem;
-      align-self: flex-end;
-    }
-    .msg-row.assistant .avatar {
-      background: var(--avatar-purple);
-      color: #fff;
-      box-shadow: 0 2px 10px rgba(124, 58, 237, 0.35);
-    }
+    .msg-row.user { justify-content: flex-end; }
+    .msg-row.assistant { justify-content: flex-start; }
+    .msg-row .avatar { display: none; }
+
     .bubble {
       padding: 12px 16px;
-      border-radius: var(--radius);
-      line-height: 1.55;
+      border-radius: var(--radius-bubble);
+      line-height: 1.5;
       overflow-wrap: anywhere;
       word-break: break-word;
-      max-width: min(100%, 680px);
+      max-width: min(88%, 520px);
       min-width: 0;
+      background: var(--surface);
+      color: var(--text);
     }
     .msg-row.user .bubble {
-      background: var(--user-bg);
-      color: var(--text);
-      border-radius: 22px;
+      background: var(--surface-2);
+      border-radius: 22px 22px 6px 22px;
       white-space: pre-wrap;
     }
     .msg-row.assistant .bubble {
-      background: var(--assistant-bg);
-      border-radius: 20px;
+      background: var(--surface);
+      border-radius: 22px 22px 22px 6px;
     }
     .msg-row.system {
-      justify-content: center; max-width: 640px;
+      justify-content: center;
     }
     .msg-row.system .bubble {
       background: transparent;
-      border: 1px dashed var(--border);
-      color: var(--muted); font-size: 0.88rem;
-      text-align: center; max-width: 100%;
+      color: var(--muted);
+      font-size: 0.82rem;
+      text-align: center;
+      max-width: 90%;
+      padding: 6px 10px;
       white-space: pre-wrap;
+    }
+    .ts-row {
+      display: flex;
+      justify-content: center;
+      padding: 4px 0 2px;
+    }
+    .ts-row span {
+      font-size: 0.72rem;
+      color: var(--muted);
+      letter-spacing: 0.01em;
     }
 
     /* Markdown inside assistant bubbles */
@@ -286,13 +279,13 @@
     .bubble.md-body code {
       font-family: var(--mono);
       font-size: 0.86em;
-      background: rgba(0,0,0,0.35);
+      background: rgba(0,0,0,0.45);
       padding: 0.12em 0.4em;
       border-radius: 6px;
     }
     .bubble.md-body pre {
-      background: #0b1220;
-      border-radius: 12px;
+      background: #0a0a0a;
+      border-radius: 14px;
       padding: 10px 12px;
       overflow-x: auto;
       margin: 0.5em 0 0.7em;
@@ -300,11 +293,11 @@
     .bubble.md-body pre code {
       background: none; padding: 0; font-size: 0.82em;
     }
-    .bubble.md-body a { color: var(--accent-hover); }
+    .bubble.md-body a { color: var(--green-soft); }
     .bubble.md-body blockquote {
       margin: 0.5em 0;
       padding: 0.25em 0 0.25em 0.85em;
-      border-left: 3px solid var(--border);
+      border-left: 3px solid var(--surface-2);
       color: var(--text-secondary);
     }
     .bubble.md-body hr {
@@ -321,297 +314,335 @@
       margin-top: 10px;
     }
     .bubble-images img {
-      max-width: 100%; border-radius: 12px;
+      max-width: 100%; border-radius: 14px;
       border: 1px solid var(--border);
-      background: #05070b;
+      background: #000;
     }
 
-    .typing-dots span {
-      display: inline-block; width: 6px; height: 6px;
-      border-radius: 50%; background: var(--muted);
-      margin: 0 2px; animation: bounce 1.2s infinite;
+    /* Working status (Grok-style) */
+    .working-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 4px 2px 8px;
+      color: var(--text-secondary);
+      font-size: 0.92rem;
+      animation: fadeIn .2s ease;
     }
-    .typing-dots span:nth-child(2) { animation-delay: .15s; }
-    .typing-dots span:nth-child(3) { animation-delay: .3s; }
-    @keyframes bounce {
-      0%, 60%, 100% { transform: translateY(0); opacity: .4; }
-      30% { transform: translateY(-4px); opacity: 1; }
-    }
+    .working-row.hidden { display: none; }
+    .working-row .label { font-weight: 400; }
 
+    /* —— Composer —— */
     .composer-wrap {
       flex-shrink: 0;
-      padding: 0 14px max(16px, env(safe-area-inset-bottom));
-      max-width: 868px; width: 100%; margin: 0 auto;
+      padding: 8px 12px max(12px, var(--safe-bottom));
+      width: 100%;
+      max-width: 100%;
       box-sizing: border-box;
+      background: var(--bg);
     }
     .composer {
-      display: flex; gap: 8px; align-items: flex-end;
-      padding: 8px 8px 8px 18px;
-      background: var(--panel);
-      border: 1px solid transparent;
-      border-radius: 999px;
-      box-shadow: var(--shadow);
-      transition: box-shadow .15s, background .15s;
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      width: 100%;
     }
-    .composer:focus-within {
-      box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.35), var(--shadow);
+    .composer-pill {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      height: 44px;
+      padding: 0 6px 0 16px;
+      background: var(--surface-pill);
+      border-radius: 999px;
+      border: none;
+    }
+    .composer-pill:focus-within {
+      box-shadow: 0 0 0 1px rgba(255,255,255,0.08);
     }
     #input {
-      flex: 1; resize: none;
-      min-height: 40px; max-height: 160px;
-      background: transparent; color: var(--text);
-      border: none; outline: none;
-      padding: 10px 4px; line-height: 1.45;
+      flex: 1;
+      resize: none;
+      min-height: 24px;
+      max-height: 120px;
+      height: 24px;
+      background: transparent;
+      color: var(--text);
+      border: none;
+      outline: none;
+      padding: 0;
+      line-height: 1.4;
+      font-size: 16px; /* prevent iOS zoom */
     }
     #input::placeholder { color: var(--muted); }
-    #send {
-      width: 40px; height: 40px; border-radius: 50%;
-      border: none; background: var(--accent); color: #fff;
-      cursor: pointer; display: grid; place-items: center;
-      flex-shrink: 0; transition: background .15s, opacity .15s, transform .1s;
+    .pill-mic {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      border: none;
+      background: transparent;
+      color: var(--text);
+      cursor: default;
+      display: grid;
+      place-items: center;
+      flex-shrink: 0;
+      padding: 0;
+      opacity: 0.85;
     }
-    #send:hover { background: var(--accent-hover); }
-    #send:active { transform: scale(0.96); }
-    #send:disabled { opacity: 0.4; cursor: not-allowed; }
-    .composer-hint {
-      margin-top: 8px; text-align: center;
-      font-size: 0.72rem; color: var(--muted);
-    }
+    #send.icon-btn.white svg { stroke: #000; }
 
+    /* —— Computer view —— */
     .computer-view {
-      padding: 16px 20px 20px;
-      gap: 12px;
+      background: var(--bg);
+      padding: 0;
+      gap: 0;
     }
-    .computer-toolbar {
-      display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    .computer-view .topbar {
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      background: transparent;
+      z-index: 10;
+      pointer-events: none;
     }
-    .computer-toolbar h2 {
-      margin: 0; font-size: 0.95rem; font-weight: 600; flex: 1;
-    }
-    .btn {
-      display: inline-flex; align-items: center; gap: 6px;
-      height: 34px; padding: 0 12px;
-      border-radius: 8px; border: 1px solid var(--border);
-      background: var(--panel); color: var(--text);
-      cursor: pointer; font-size: 0.82rem; font-weight: 500;
-      text-decoration: none;
-      transition: border-color .15s, background .15s;
-    }
-    .btn:hover { border-color: var(--accent); color: var(--accent-hover); }
-    .btn.ghost { background: transparent; }
+    .computer-view .topbar > * { pointer-events: auto; }
     .desktop-stage {
-      flex: 1; min-height: 0;
-      border-radius: 12px;
-      border: 1px solid var(--border);
-      background: #05070b;
+      flex: 1;
+      min-height: 0;
+      width: 100%;
+      background: #000;
       overflow: hidden;
       position: relative;
-      box-shadow: var(--shadow);
-    }
-    .desktop-stage::before {
-      content: "";
-      position: absolute; inset: 0;
-      background:
-        radial-gradient(circle at 30% 20%, rgba(59,130,246,.06), transparent 40%),
-        radial-gradient(circle at 70% 80%, rgba(124,58,237,.05), transparent 40%);
-      pointer-events: none; z-index: 0;
     }
     #novnc-frame {
-      position: relative; z-index: 1;
-      width: 100%; height: 100%; border: 0; background: transparent;
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      border: 0;
+      background: #000;
+      z-index: 1;
     }
     .desktop-empty {
-      position: absolute; inset: 0; z-index: 2;
-      display: flex; flex-direction: column;
-      align-items: center; justify-content: center; gap: 12px;
-      color: var(--muted); text-align: center; padding: 24px;
-      background: rgba(5, 7, 11, 0.85);
+      position: absolute;
+      inset: 0;
+      z-index: 2;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 14px;
+      color: var(--text);
+      text-align: center;
+      padding: 24px;
+      background: #000;
     }
     .desktop-empty.hidden { display: none; }
-    .desktop-empty h3 { margin: 0; color: var(--text-secondary); font-weight: 600; }
-    .desktop-empty p { margin: 0; max-width: 360px; font-size: 0.88rem; }
-    .desktop-meta {
-      font-size: 0.75rem; color: var(--muted); line-height: 1.45;
+    .desktop-empty .connecting-label {
+      margin: 0;
+      font-size: 1rem;
+      font-weight: 500;
+      color: var(--text);
     }
-    .desktop-meta code {
-      background: var(--panel); padding: 1px 6px; border-radius: 4px;
-      font-family: var(--mono); font-size: 0.72rem;
+    .spinner {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      border: 2.5px solid rgba(255,255,255,0.15);
+      border-top-color: rgba(255,255,255,0.85);
+      animation: spin 0.85s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .computer-bottom {
+      position: absolute;
+      left: 0; right: 0; bottom: 0;
+      z-index: 10;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 16px max(16px, var(--safe-bottom));
+      pointer-events: none;
+      background: linear-gradient(to top, rgba(0,0,0,0.55), transparent);
+    }
+    .computer-bottom > * { pointer-events: auto; }
+
+    .sr-only {
+      position: absolute;
+      width: 1px; height: 1px;
+      padding: 0; margin: -1px;
+      overflow: hidden; clip: rect(0,0,0,0);
+      border: 0;
     }
 
-    .menu-toggle {
-      display: none;
-      width: 36px; height: 36px; border-radius: 10px;
-      border: 1px solid var(--border); background: var(--panel);
-      cursor: pointer; align-items: center; justify-content: center;
-      flex-shrink: 0;
-      margin-top: 2px;
-    }
-    @media (max-width: 800px) {
-      .app {
-        grid-template-columns: 1fr;
-        width: 100vw;
-        max-width: 100vw;
-        height: 100dvh;
-        overflow: hidden;
-      }
-      .sidebar {
-        position: fixed;
-        top: 0; bottom: 0; left: 0;
-        width: min(var(--sidebar-w), 86vw);
-        max-width: 100vw;
-        z-index: 40;
-        transform: translateX(-105%);
-        transition: transform .2s ease;
-        padding-top: env(safe-area-inset-top);
-        padding-bottom: env(safe-area-inset-bottom);
-      }
-      .sidebar.open { transform: none; }
-      .menu-toggle { display: inline-flex; }
-      .main { width: 100%; max-width: 100vw; overflow: hidden; }
-      .chat-header {
-        padding: 12px 14px;
-        padding-top: max(12px, env(safe-area-inset-top));
-        gap: 10px;
-      }
-      .chat-header h2 { font-size: 1.2rem; }
-      .chat-header .sub {
-        display: block;
-        font-size: 0.72rem;
-        color: var(--muted);
-      }
-      #messages {
-        padding: 14px 12px 8px;
-        gap: 14px;
-      }
-      .msg-row { gap: 8px; }
-      .msg-row.assistant .avatar { width: 30px; height: 30px; font-size: 0.7rem; }
-      .bubble {
-        padding: 11px 14px;
-        max-width: calc(100% - 4px);
-        font-size: 0.95rem;
-      }
-      .msg-row.user .bubble { border-radius: 22px; }
-      .composer-wrap {
-        padding: 0 12px max(12px, env(safe-area-inset-bottom));
-      }
-      .composer { border-radius: 999px; padding: 6px 6px 6px 16px; }
-      #input { min-height: 38px; font-size: 16px; }
-      #send { width: 38px; height: 38px; }
-      .composer-hint { display: block; font-size: 0.68rem; }
-      .computer-view {
-        padding: 10px;
-        padding-top: max(10px, env(safe-area-inset-top));
-        padding-bottom: max(10px, env(safe-area-inset-bottom));
-      }
-      .computer-toolbar { gap: 8px; }
-      .desktop-meta { font-size: 0.7rem; }
-      .backdrop {
-        display: none; position: fixed; inset: 0; background: rgba(0,0,0,.55);
-        z-index: 30;
-      }
-      .backdrop.show { display: block; }
+    /* Hidden legacy sidebar hooks (kept for JS compatibility, not shown) */
+    .sidebar, .backdrop, .sidebar-foot, .composer-hint, .desktop-meta {
+      display: none !important;
     }
   </style>
 </head>
 <body>
   <div class="backdrop" id="backdrop"></div>
   <div class="app">
-    <aside class="sidebar" id="sidebar">
-      <div class="brand">
-        <div class="brand-mark">N</div>
-        <div class="brand-text">
-          <h1>Nitc Agent</h1>
-          <p>Self-hosted · desktop</p>
-        </div>
-      </div>
-
-      <button type="button" class="nav-btn primary" id="btn-new-chat" title="New chat">
-        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M12 5v14M5 12h14"/>
-        </svg>
-        New chat
-      </button>
-
-      <button type="button" class="nav-btn active" data-view="chat" id="nav-chat">
-        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"/>
-        </svg>
-        Chat
-      </button>
-      <button type="button" class="nav-btn" data-view="computer" id="nav-computer">
-        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <rect x="3" y="4" width="18" height="12" rx="2"/>
-          <path d="M8 20h8M12 16v4"/>
-        </svg>
-        Computer
-      </button>
-
-      <div class="sidebar-spacer"></div>
+    <!-- Minimal hidden nav for JS compatibility -->
+    <aside class="sidebar" id="sidebar" aria-hidden="true">
+      <button type="button" class="nav-btn active" data-view="chat" id="nav-chat">Chat</button>
+      <button type="button" class="nav-btn" data-view="computer" id="nav-computer">Computer</button>
+      <button type="button" id="btn-new-chat">New</button>
       <div class="sidebar-foot">
         <span id="status-dot"></span>
         <span id="status-text">checking…</span>
       </div>
     </aside>
 
-    <main class="main">
+    <main class="main" style="display:flex;flex-direction:column;flex:1;min-height:0;min-width:0;overflow:hidden;width:100%;">
+      <!-- CHAT -->
       <section class="view active" id="view-chat">
-        <div class="chat-header">
-          <button type="button" class="menu-toggle" id="menu-toggle" aria-label="Menu">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M4 7h16M4 12h16M4 17h16"/>
+        <header class="topbar">
+          <button type="button" class="icon-btn" id="btn-back" aria-label="New chat" title="New chat">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M15 18l-6-6 6-6"/>
             </svg>
           </button>
-          <div class="header-text">
-            <h2>Chat</h2>
-            <div class="sub">Ask me to drive the desktop, run commands, edit files, browse, or use GitHub</div>
+          <div class="topbar-center" title="Animal Nitc">
+            <svg class="teardrop" viewBox="0 0 64 64" aria-hidden="true">
+              <defs>
+                <linearGradient id="tdg" x1="20%" y1="0%" x2="80%" y2="100%">
+                  <stop offset="0%" stop-color="#5ef08a"/>
+                  <stop offset="100%" stop-color="#2bb84f"/>
+                </linearGradient>
+              </defs>
+              <path fill="url(#tdg)" d="M32 4C22 18 12 30 12 42a20 20 0 0 0 40 0C52 30 42 18 32 4z"/>
+              <circle cx="26" cy="28" r="3.2" fill="#0a0a0a"/>
+              <circle cx="38" cy="28" r="3.2" fill="#0a0a0a"/>
+            </svg>
+            <span>Animal Nitc</span>
           </div>
-        </div>
+          <button type="button" class="icon-btn" id="btn-open-computer" aria-label="Computer" title="Computer">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="4" width="18" height="13" rx="2"/>
+              <path d="M8 21h8M12 17v4"/>
+            </svg>
+          </button>
+        </header>
+
         <div id="messages">
           <div class="msg-row system">
-            <div class="bubble">Welcome. Open <strong>Computer</strong> in the sidebar to watch the live desktop while I work.</div>
+            <div class="bubble">Welcome. Tap the monitor icon to watch the live desktop while I work.</div>
           </div>
         </div>
+
+        <div class="working-row hidden" id="working-row" aria-live="polite">
+          <svg class="teardrop sm" viewBox="0 0 64 64" aria-hidden="true">
+            <path fill="#34c759" d="M32 4C22 18 12 30 12 42a20 20 0 0 0 40 0C52 30 42 18 32 4z"/>
+            <circle cx="26" cy="28" r="3.2" fill="#0a0a0a"/>
+            <circle cx="38" cy="28" r="3.2" fill="#0a0a0a"/>
+          </svg>
+          <span class="label">Animal Nitc is working</span>
+        </div>
+
         <div class="composer-wrap">
           <form class="composer" id="form">
-            <textarea id="input" placeholder="Message Nitc Agent…" rows="1" autofocus></textarea>
-            <button type="submit" id="send" aria-label="Send">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
-                <path d="M5 12h14M13 6l6 6-6 6"/>
+            <button type="button" class="icon-btn" id="btn-plus" aria-label="New chat" title="New chat">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                <path d="M12 5v14M5 12h14"/>
+              </svg>
+            </button>
+            <div class="composer-pill">
+              <textarea id="input" placeholder="Ask Animal Nitc" rows="1" autofocus></textarea>
+              <button type="button" class="pill-mic" aria-label="Voice" title="Voice (visual)" tabindex="-1">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="9" y="2" width="6" height="12" rx="3"/>
+                  <path d="M5 11a7 7 0 0 0 14 0M12 18v4"/>
+                </svg>
+              </button>
+            </div>
+            <button type="submit" class="icon-btn white" id="send" aria-label="Send">
+              <!-- waveform icon (idle) / send when typing handled in JS optionally; use waveform to match Grok -->
+              <svg id="send-icon-wave" width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <rect x="2.5" y="9" width="2.4" height="6" rx="1.2"/>
+                <rect x="7" y="5" width="2.4" height="14" rx="1.2"/>
+                <rect x="11.5" y="7.5" width="2.4" height="9" rx="1.2"/>
+                <rect x="16" y="4" width="2.4" height="16" rx="1.2"/>
+                <rect x="20.5" y="9" width="2.4" height="6" rx="1.2"/>
               </svg>
             </button>
           </form>
-          <div class="composer-hint">Enter to send · Shift+Enter for newline</div>
         </div>
       </section>
 
+      <!-- COMPUTER -->
       <section class="view computer-view" id="view-computer">
-        <div class="computer-toolbar">
-          <button type="button" class="menu-toggle" id="menu-toggle-2" aria-label="Menu">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M4 7h16M4 12h16M4 17h16"/>
+        <header class="topbar">
+          <button type="button" class="icon-btn" id="btn-computer-back" aria-label="Back to chat">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M15 18l-6-6 6-6"/>
             </svg>
           </button>
-          <h2>Computer</h2>
-          <a class="btn" id="novnc-open" href="#" target="_blank" rel="noopener">Open fullscreen</a>
-          <button type="button" class="btn ghost" id="novnc-reload">Reload</button>
-          <button type="button" class="btn ghost" id="novnc-connect">Connect</button>
-        </div>
+          <div class="topbar-title-row">
+            <svg class="teardrop" viewBox="0 0 64 64" aria-hidden="true">
+              <path fill="#34c759" d="M32 4C22 18 12 30 12 42a20 20 0 0 0 40 0C52 30 42 18 32 4z"/>
+              <circle cx="26" cy="28" r="3.2" fill="#0a0a0a"/>
+              <circle cx="38" cy="28" r="3.2" fill="#0a0a0a"/>
+            </svg>
+            <span class="name">Animal Nitc</span>
+          </div>
+          <div class="topbar-actions">
+            <button type="button" class="icon-btn" id="novnc-help" aria-label="Help" title="Help">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+                <circle cx="12" cy="12" r="10"/>
+                <path d="M9.1 9a3 3 0 1 1 4.4 2.7c-.8.4-1.5 1-1.5 2M12 17h.01"/>
+              </svg>
+            </button>
+            <button type="button" class="icon-btn" id="novnc-reload" aria-label="More" title="Reload">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                <circle cx="6" cy="12" r="1.6"/>
+                <circle cx="12" cy="12" r="1.6"/>
+                <circle cx="18" cy="12" r="1.6"/>
+              </svg>
+            </button>
+          </div>
+        </header>
+
         <div class="desktop-stage">
           <div class="desktop-empty" id="desktop-empty">
-            <h3>Live Linux desktop</h3>
-            <p>Click Connect to stream the XFCE session via noVNC (same-origin on port 8080 — no password for tryout).</p>
-            <button type="button" class="btn" id="novnc-connect-2">Connect desktop</button>
+            <div class="spinner" aria-hidden="true"></div>
+            <p class="connecting-label">Connecting...</p>
+            <button type="button" class="sr-only" id="novnc-connect">Connect</button>
+            <button type="button" class="sr-only" id="novnc-connect-2">Connect desktop</button>
           </div>
-          <iframe id="novnc-frame" title="Nitc desktop noVNC" allow="clipboard-read; clipboard-write"></iframe>
+          <iframe id="novnc-frame" title="Animal Nitc desktop noVNC" allow="clipboard-read; clipboard-write"></iframe>
         </div>
-        <div class="desktop-meta">
-          Desktop streams via same-origin <code>/novnc/</code> on port <strong>8080</strong>
-          (mobile-friendly; carriers often block raw :6080).
-          Open no-password VNC on the internet is insecure — tryout only; prefer HTTPS + auth in production.
+
+        <div class="computer-bottom">
+          <button type="button" class="icon-btn" id="novnc-clipboard" aria-label="Clipboard" title="Open fullscreen">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="8" y="3" width="8" height="4" rx="1"/>
+              <path d="M8 5H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/>
+              <path d="M9 12h6M9 16h4"/>
+            </svg>
+          </button>
+          <a class="icon-btn" id="novnc-open" href="#" target="_blank" rel="noopener" aria-label="Keyboard / fullscreen" title="Fullscreen">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="7" width="18" height="12" rx="2"/>
+              <circle cx="7" cy="13" r="0.9" fill="currentColor"/>
+              <circle cx="10" cy="13" r="0.9" fill="currentColor"/>
+              <circle cx="13" cy="13" r="0.9" fill="currentColor"/>
+              <circle cx="16" cy="13" r="0.9" fill="currentColor"/>
+              <circle cx="8.5" cy="10" r="0.9" fill="currentColor"/>
+              <circle cx="11.5" cy="10" r="0.9" fill="currentColor"/>
+              <circle cx="14.5" cy="10" r="0.9" fill="currentColor"/>
+            </svg>
+          </a>
         </div>
       </section>
     </main>
   </div>
+
+  <!-- hidden menu toggles for JS compatibility -->
+  <button type="button" class="sr-only" id="menu-toggle">Menu</button>
+  <button type="button" class="sr-only" id="menu-toggle-2">Menu</button>
 
   <script>
     const messagesEl = document.getElementById("messages");
@@ -626,6 +657,7 @@
     const desktopEmpty = document.getElementById("desktop-empty");
     const sidebar = document.getElementById("sidebar");
     const backdrop = document.getElementById("backdrop");
+    const workingRow = document.getElementById("working-row");
 
     /** @type {{role: string, content: string}[]} */
     let history = [];
@@ -643,7 +675,7 @@
 
     function autoResize() {
       input.style.height = "auto";
-      input.style.height = Math.min(input.scrollHeight, 160) + "px";
+      input.style.height = Math.min(input.scrollHeight, 120) + "px";
     }
     input.addEventListener("input", autoResize);
 
@@ -659,7 +691,6 @@
         .replace(/"/g, "&quot;");
     }
 
-    /** Safe markdown → HTML for assistant-only content. */
     function renderAssistantMarkdown(text) {
       const raw = String(text || "");
       if (window.marked && window.DOMPurify) {
@@ -676,12 +707,42 @@
           ALLOW_DATA_ATTR: false,
         });
       }
-      // Fallback: escape + minimal bold/code
       let out = escapeHtml(raw);
       out = out.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
       out = out.replace(/`([^`]+)`/g, "<code>$1</code>");
       out = out.replace(/\n/g, "<br>");
       return out;
+    }
+
+    function formatNowTs() {
+      try {
+        const t = new Intl.DateTimeFormat(undefined, {
+          hour: "numeric", minute: "2-digit"
+        }).format(new Date());
+        return "Today " + t;
+      } catch (_) {
+        return "Today";
+      }
+    }
+
+    function appendTimestampIfNeeded() {
+      const last = messagesEl.querySelector(".ts-row:last-of-type");
+      // simple: show once per session start / after welcome
+      if (!messagesEl.dataset.tsShown) {
+        const row = document.createElement("div");
+        row.className = "ts-row";
+        row.innerHTML = "<span>" + escapeHtml(formatNowTs()) + "</span>";
+        messagesEl.appendChild(row);
+        messagesEl.dataset.tsShown = "1";
+      }
+    }
+
+    function setWorking(on) {
+      workingRow.classList.toggle("hidden", !on);
+      if (on) {
+        messagesEl.scrollTop = messagesEl.scrollHeight;
+        workingRow.scrollIntoView({ block: "nearest" });
+      }
     }
 
     function appendMessage(role, content, extra, images) {
@@ -698,7 +759,9 @@
       const bubble = document.createElement("div");
       bubble.className = "bubble";
       if (content === "__thinking__") {
-        bubble.innerHTML = '<div class="typing-dots"><span></span><span></span><span></span></div>';
+        // Prefer Grok-style working row; keep a minimal bubble for removal handle
+        bubble.style.display = "none";
+        bubble.dataset.thinking = "1";
       } else if (role === "assistant") {
         bubble.classList.add("md-body");
         const display = Array.isArray(images) && images.length
@@ -719,9 +782,8 @@
           bubble.appendChild(wrap);
         }
       } else if (role === "system") {
-        bubble.innerHTML = content; // trusted static welcome / system strings only
+        bubble.innerHTML = content;
       } else {
-        // User: never render as HTML
         bubble.textContent = content;
       }
       if (extra) {
@@ -744,8 +806,15 @@
         v.classList.toggle("active", v.id === "view-" + name);
       });
       closeSidebar();
-      if (name === "computer" && !computerLoaded && novncEmbed) {
-        connectDesktop();
+      if (name === "computer") {
+        // Always show connecting state briefly, then connect
+        if (!computerLoaded) {
+          desktopEmpty.classList.remove("hidden");
+        }
+        if (novncEmbed) {
+          // slight delay so "Connecting..." is visible like the native app
+          setTimeout(() => connectDesktop(), computerLoaded ? 0 : 400);
+        }
       }
     }
 
@@ -753,21 +822,23 @@
       if (!novncEmbed) return;
       novncFrame.src = novncEmbed;
       computerLoaded = true;
-      desktopEmpty.classList.add("hidden");
+      // Keep spinner briefly, then hide when iframe loads
+      const hide = () => desktopEmpty.classList.add("hidden");
+      novncFrame.addEventListener("load", hide, { once: true });
+      setTimeout(hide, 2500);
     }
 
     function newChat() {
       history = [];
       messagesEl.innerHTML = "";
-      appendMessage("system", "New chat started. Open <strong>Computer</strong> to watch the live desktop.");
+      delete messagesEl.dataset.tsShown;
+      appendMessage("system", "New chat started. Tap the monitor icon to watch the live desktop.");
+      setWorking(false);
       setView("chat");
       input.focus();
     }
 
-    function openSidebar() {
-      sidebar.classList.add("open");
-      backdrop.classList.add("show");
-    }
+    function openSidebar() { /* no-op: Grok-style UI has no sidebar drawer */ }
     function closeSidebar() {
       sidebar.classList.remove("open");
       backdrop.classList.remove("show");
@@ -777,16 +848,29 @@
       b.addEventListener("click", () => setView(b.dataset.view));
     });
     document.getElementById("btn-new-chat").addEventListener("click", newChat);
+    document.getElementById("btn-plus").addEventListener("click", newChat);
+    document.getElementById("btn-back").addEventListener("click", newChat);
+    document.getElementById("btn-open-computer").addEventListener("click", () => setView("computer"));
+    document.getElementById("btn-computer-back").addEventListener("click", () => setView("chat"));
     document.getElementById("menu-toggle").addEventListener("click", openSidebar);
     document.getElementById("menu-toggle-2").addEventListener("click", openSidebar);
     backdrop.addEventListener("click", closeSidebar);
     document.getElementById("novnc-connect").addEventListener("click", connectDesktop);
     document.getElementById("novnc-connect-2").addEventListener("click", connectDesktop);
+    document.getElementById("novnc-clipboard").addEventListener("click", () => {
+      if (novncEmbed) window.open(novncEmbed, "_blank", "noopener");
+    });
+    document.getElementById("novnc-help").addEventListener("click", () => {
+      alert("Animal Nitc Computer streams the live XFCE desktop via same-origin /novnc/ (path=websockify).");
+    });
     novncReload.addEventListener("click", () => {
       if (novncEmbed) {
+        desktopEmpty.classList.remove("hidden");
         novncFrame.src = novncEmbed;
         computerLoaded = true;
-        desktopEmpty.classList.add("hidden");
+        const hide = () => desktopEmpty.classList.add("hidden");
+        novncFrame.addEventListener("load", hide, { once: true });
+        setTimeout(hide, 2500);
       }
     });
 
@@ -823,9 +907,11 @@
       if (!text) return;
       input.value = "";
       autoResize();
+      appendTimestampIfNeeded();
       appendMessage("user", text);
       history.push({ role: "user", content: text });
       sendBtn.disabled = true;
+      setWorking(true);
       const thinking = appendMessage("assistant", "__thinking__");
       try {
         const r = await fetch("/api/chat", {
@@ -835,6 +921,7 @@
         });
         const data = await r.json();
         thinking.remove();
+        setWorking(false);
         if (!r.ok) {
           appendMessage("assistant", data.detail || JSON.stringify(data));
         } else {
@@ -845,6 +932,7 @@
         }
       } catch (err) {
         thinking.remove();
+        setWorking(false);
         appendMessage("assistant", "Network error: " + err.message);
       } finally {
         sendBtn.disabled = false;
