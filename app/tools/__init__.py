@@ -342,6 +342,51 @@ async def run_tool(name: str, arguments: dict[str, Any] | str | None) -> str:
     else:
         args = arguments
 
+    # Auto-review gate for risky shell/desktop/network tools
+    try:
+        from app.runtime_settings import (
+            RISKY_TOOLS,
+            auto_review_enabled,
+            auto_review_rules,
+            consume_allow_once,
+        )
+        if name in RISKY_TOOLS and auto_review_enabled():
+            if not consume_allow_once(name, args):
+                rules = auto_review_rules()
+                return json.dumps({
+                    "needs_approval": True,
+                    "auto_review": True,
+                    "tool": name,
+                    "args": args,
+                    "rules": rules,
+                    "error": "auto_review_blocked",
+                    "message": (
+                        "Auto-review is ON. This risky action was paused for user approval. "
+                        "Do not retry the same tool until the user Approves in the chat UI "
+                        "(or says they approved). Summarize what you wanted to do and wait."
+                    ),
+                })
+    except Exception:  # noqa: BLE001
+        pass
+
+    # Plugin disable gate
+    try:
+        from app.runtime_settings import load_settings
+        plugs = (load_settings().get("plugins") or {})
+        plugin_for = {
+            "shell": "shell",
+            "read_file": "files", "write_file": "files", "list_dir": "files",
+            "browser_navigate": "browser", "browser_get_text": "browser", "browser_screenshot": "browser",
+            "github_run": "github",
+            "desktop_screenshot": "desktop", "desktop_click": "desktop", "desktop_type": "desktop",
+            "desktop_hotkey": "desktop", "desktop_scroll": "desktop", "desktop_open_browser": "desktop",
+        }
+        pk = plugin_for.get(name)
+        if pk and plugs.get(pk) is False:
+            return json.dumps({"error": f"Plugin '{pk}' is disabled in Profile → Plugins"})
+    except Exception:  # noqa: BLE001
+        pass
+
     try:
         result = HANDLERS[name](**args)
         if hasattr(result, "__await__"):

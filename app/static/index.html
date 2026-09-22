@@ -717,6 +717,52 @@
     .bot-ctx-more.show { display: block; }
     .bot-ctx-more button { padding-left: 22px; }
 
+
+    /* Auth + approval (v0.2.11) */
+    .auth-screen {
+      position: fixed; inset: 0; z-index: 90; background: #000;
+      display: none; flex-direction: column; align-items: center; justify-content: center;
+      padding: 24px 20px; padding-top: max(24px, var(--safe-top));
+      padding-bottom: max(24px, var(--safe-bottom));
+    }
+    .auth-screen.show { display: flex; }
+    .auth-card {
+      width: 100%; max-width: 360px; background: #1c1c1e; border-radius: 20px;
+      padding: 28px 22px 22px; box-shadow: 0 16px 48px rgba(0,0,0,0.5);
+    }
+    .auth-card .logo {
+      width: 56px; height: 56px; margin: 0 auto 14px; border-radius: 50%;
+      background: linear-gradient(145deg, #5ef08a, #2bb84f);
+      display: grid; place-items: center;
+    }
+    .auth-card h2 { margin: 0 0 6px; text-align: center; font-size: 1.25rem; }
+    .auth-card .sub { text-align: center; color: var(--muted); font-size: 0.88rem; margin: 0 0 18px; }
+    .auth-card label { display: block; font-size: 0.82rem; color: var(--muted); margin: 10px 0 6px; }
+    .auth-card input {
+      width: 100%; background: #2c2c2e; border: 1px solid #3a3a3c; border-radius: 12px;
+      padding: 12px 14px; outline: none; color: var(--text); font-size: 16px;
+    }
+    .auth-card .auth-actions { display: flex; flex-direction: column; gap: 10px; margin-top: 18px; }
+    .auth-card .auth-btn {
+      border: none; border-radius: 999px; padding: 12px 16px; font-weight: 700;
+      cursor: pointer; background: #fff; color: #000; font-size: 0.98rem;
+    }
+    .auth-card .auth-btn.secondary { background: #2c2c2e; color: var(--text); }
+    .auth-card .auth-err { color: var(--danger); font-size: 0.85rem; margin-top: 10px; text-align: center; min-height: 1.2em; }
+    .auth-hint { margin-top: 14px; color: var(--muted); font-size: 0.78rem; text-align: center; line-height: 1.35; }
+    .approval-card {
+      margin: 4px 0 8px; background: #2c2c2e; border: 1px solid #3a3a3c;
+      border-radius: 16px; padding: 12px 14px; max-width: 100%;
+    }
+    .approval-card .at { font-weight: 700; margin: 0 0 6px; font-size: 0.95rem; }
+    .approval-card .ad { color: var(--text-secondary); font-size: 0.85rem; margin: 0 0 10px; white-space: pre-wrap; word-break: break-word; }
+    .approval-card .aa { display: flex; gap: 8px; flex-wrap: wrap; }
+    .approval-card button {
+      border: none; border-radius: 999px; padding: 8px 14px; font-weight: 700; cursor: pointer;
+      background: #34c759; color: #000;
+    }
+    .approval-card button.deny { background: #3a3a3c; color: var(--text); }
+
     .app-toast {
       position: fixed; left: 50%; bottom: calc(max(20px, var(--safe-bottom)) + 24px);
       transform: translateX(-50%); z-index: 100;
@@ -1579,6 +1625,12 @@
           const images = Array.isArray(done.images) ? done.images : [];
           appendMessage("assistant", reply, null, images);
           history.push({ role: "assistant", content: reply, images, job_id: jobId });
+          maybeShowApprovalsFromText(reply);
+          try {
+            (done.messages || []).forEach((m) => {
+              if (m.role === "tool") maybeShowApprovalsFromText(String(m.content || ""));
+            });
+          } catch (_) {}
         }
         persistActiveChat();
       } catch (err) {
@@ -3012,6 +3064,7 @@
 
     // ========== Profile settings + bot long-press (v0.2.8) ==========
     const SETTINGS_KEY = "nitc_settings_v1";
+    const SESSION_KEY = "nitc_session_v1";
     const TIMEZONES = [
       "Africa/Lagos", "UTC", "America/New_York", "America/Chicago", "America/Denver",
       "America/Los_Angeles", "Europe/London", "Europe/Paris", "Europe/Berlin",
@@ -3122,7 +3175,7 @@
       const titles = {
         main: "Profile", usage: "Usage", plugins: "Plugins", rules: "Auto-review Rules",
         appearance: "Appearance", help: "Help Center", privacy: "Privacy Policy",
-        terms: "Terms of Service", feedback: "Send Feedback", hidden: "Hidden",
+        terms: "Terms of Service", feedback: "Send Feedback", hidden: "Hidden", language: "Language",
       };
       const t = document.getElementById("profile-title");
       if (t) t.textContent = titles[stack] || "Profile";
@@ -3130,10 +3183,12 @@
       if (stack === "rules") renderRulesList();
       if (stack === "appearance") renderAppearanceOpts();
       if (stack === "hidden") renderHiddenList();
+      if (stack === "language") renderLanguageOpts();
       if (stack === "usage") renderProfileMain();
     }
 
     function openProfileSheet() {
+      if (!isSignedIn()) { showAuthScreen(); return; }
       closeBotsMenu();
       closeBotCtx();
       renderProfileMain();
@@ -3221,6 +3276,9 @@
         tog.addEventListener("click", () => {
           settings.plugins[idx].on = !settings.plugins[idx].on;
           saveSettings();
+          const plugMap = {};
+          (settings.plugins || []).forEach((x) => { plugMap[x.id] = !!x.on; });
+          syncSettingsToServer({ plugins: plugMap });
           haptic(8);
           renderPluginsList();
         });
@@ -3236,7 +3294,7 @@
       const rules = settings.autoReviewRules || [];
       if (!rules.length) {
         const empty = document.createElement("li");
-        empty.innerHTML = '<span class="rtxt" style="color:var(--muted)">No rules yet</span>';
+        empty.innerHTML = '<span class="rtxt" style="color:var(--muted)">No rules yet — add one below</span>';
         ul.appendChild(empty);
       }
       rules.forEach((rule, i) => {
@@ -3244,6 +3302,18 @@
         const span = document.createElement("span");
         span.className = "rtxt";
         span.textContent = rule;
+        span.title = "Tap to edit";
+        span.style.cursor = "pointer";
+        span.addEventListener("click", () => {
+          const next = prompt("Edit rule", rule);
+          if (next === null) return;
+          const v = next.trim();
+          if (!v) return;
+          settings.autoReviewRules[i] = v;
+          saveSettings();
+          syncSettingsToServer({ autoReviewRules: settings.autoReviewRules });
+          renderRulesList();
+        });
         const del = document.createElement("button");
         del.type = "button";
         del.className = "rdel";
@@ -3251,6 +3321,7 @@
         del.addEventListener("click", () => {
           settings.autoReviewRules.splice(i, 1);
           saveSettings();
+          syncSettingsToServer({ autoReviewRules: settings.autoReviewRules });
           document.getElementById("ps-rules-count").textContent = String(settings.autoReviewRules.length);
           renderRulesList();
         });
@@ -3297,6 +3368,172 @@
       });
     }
 
+
+    function renderLanguageOpts() {
+      document.querySelectorAll("#ps-language-opts [data-language]").forEach((btn) => {
+        const check = btn.querySelector("[data-check]");
+        if (check) check.textContent = btn.dataset.language === (settings.language || "System") ? "✓" : "";
+      });
+      const lv = document.getElementById("ps-language-val");
+      if (lv) lv.textContent = settings.language || "System";
+    }
+
+    let authSession = null;
+    function loadSession() {
+      try { const raw = localStorage.getItem(SESSION_KEY); if (raw) authSession = JSON.parse(raw); }
+      catch (_) { authSession = null; }
+      return authSession;
+    }
+    function saveSession(sess) {
+      authSession = sess;
+      try { if (sess) localStorage.setItem(SESSION_KEY, JSON.stringify(sess)); else localStorage.removeItem(SESSION_KEY); } catch (_) {}
+    }
+    function isSignedIn() { return !!(authSession && authSession.token); }
+    function authHeaders() {
+      const h = { "Content-Type": "application/json" };
+      if (authSession && authSession.token) h["Authorization"] = "Bearer " + authSession.token;
+      return h;
+    }
+    function showAuthScreen() {
+      const el = document.getElementById("auth-screen");
+      if (!el) return;
+      el.hidden = false; el.classList.add("show");
+      closeProfileSheet(); closeBotCtx(); closeBotsMenu();
+    }
+    function hideAuthScreen() {
+      const el = document.getElementById("auth-screen");
+      if (!el) return;
+      el.classList.remove("show"); el.hidden = true;
+    }
+    async function signOut() {
+      try { await fetch("/api/auth/logout", { method: "POST", headers: authHeaders() }); } catch (_) {}
+      saveSession(null);
+      closeProfileSheet();
+      setView("bots");
+      showAuthScreen();
+      showAppToast("Signed out");
+      haptic(20);
+    }
+    async function doLogin(email, password, pin) {
+      const err = document.getElementById("auth-err");
+      if (err) err.textContent = "";
+      try {
+        const r = await fetch("/api/auth/login", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email, password: password || null, pin: pin || null }),
+        });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(data.detail || ("Error " + r.status));
+        saveSession({ token: data.token, email: data.user.email, name: data.user.name, initials: data.user.initials || "CO" });
+        settings.profileEmail = data.user.email;
+        settings.profileName = data.user.name;
+        settings.profileInitials = data.user.initials || "CO";
+        saveSettings();
+        renderProfileMain();
+        hideAuthScreen();
+        setView("bots");
+        showAppToast("Signed in");
+        haptic(12);
+        syncSettingsToServer();
+      } catch (e) { if (err) err.textContent = String(e.message || e); }
+    }
+    function initAuthUI() {
+      document.getElementById("auth-login-btn")?.addEventListener("click", () => {
+        const email = (document.getElementById("auth-email").value || "").trim();
+        const password = document.getElementById("auth-password").value || "";
+        const pin = (document.getElementById("auth-pin").value || "").trim();
+        if (!email) { document.getElementById("auth-err").textContent = "Email required"; return; }
+        doLogin(email, password, pin);
+      });
+      document.getElementById("auth-demo-btn")?.addEventListener("click", () => {
+        document.getElementById("auth-email").value = "polycapsamuel5@gmail.com";
+        document.getElementById("auth-password").value = "nitc1234";
+        document.getElementById("auth-pin").value = "";
+        doLogin("polycapsamuel5@gmail.com", "nitc1234", "");
+      });
+      ["auth-password", "auth-pin", "auth-email"].forEach((id) => {
+        document.getElementById(id)?.addEventListener("keydown", (e) => {
+          if (e.key === "Enter") document.getElementById("auth-login-btn")?.click();
+        });
+      });
+    }
+    async function syncSettingsToServer(patch) {
+      try {
+        const body = patch || {
+          autoReview: !!settings.autoReview,
+          autoReviewRules: settings.autoReviewRules || [],
+          tzAuto: !!settings.tzAuto,
+          timeZone: settings.timeZone || "Africa/Lagos",
+          notifications: !!settings.notifications,
+          appearance: settings.appearance || "Black",
+          language: settings.language || "System",
+          haptics: !!settings.haptics,
+          plugins: Object.fromEntries((settings.plugins || []).map((p) => [p.id, !!p.on])),
+        };
+        await fetch("/api/settings", { method: "PUT", headers: authHeaders(), body: JSON.stringify(body) });
+      } catch (_) {}
+    }
+    async function pullSettingsFromServer() {
+      try {
+        const r = await fetch("/api/settings");
+        if (!r.ok) return;
+        const data = await r.json();
+        if (typeof data.autoReview === "boolean") settings.autoReview = data.autoReview;
+        if (Array.isArray(data.autoReviewRules)) settings.autoReviewRules = data.autoReviewRules;
+        if (typeof data.tzAuto === "boolean") settings.tzAuto = data.tzAuto;
+        if (data.timeZone) settings.timeZone = data.timeZone;
+        if (typeof data.notifications === "boolean") settings.notifications = data.notifications;
+        if (data.appearance) settings.appearance = data.appearance;
+        if (data.language) settings.language = data.language;
+        if (typeof data.haptics === "boolean") settings.haptics = data.haptics;
+        if (data.plugins && typeof data.plugins === "object") {
+          (settings.plugins || []).forEach((p) => { if (p.id in data.plugins) p.on = !!data.plugins[p.id]; });
+        }
+        saveSettings();
+      } catch (_) {}
+    }
+    function appendApprovalCard(tool, args, rules) {
+      const card = document.createElement("div");
+      card.className = "approval-card";
+      card.dataset.live = "1";
+      const argStr = JSON.stringify(args || {}, null, 0).slice(0, 280);
+      card.innerHTML = '<p class="at">Auto-review · approval needed</p><p class="ad"></p><div class="aa"><button type="button" class="approve">Approve & continue</button><button type="button" class="deny">Deny</button></div>';
+      card.querySelector(".ad").textContent = "Tool: " + tool + "\n" + argStr + ((rules && rules.length) ? ("\nRules: " + rules.join("; ")) : "");
+      card.querySelector(".approve").addEventListener("click", async () => {
+        card.querySelector(".approve").disabled = true;
+        try {
+          await fetch("/api/settings/allow-once", { method: "POST", headers: authHeaders(), body: JSON.stringify({ tool, args: args || {} }) });
+          showAppToast("Approved — continuing");
+          input.value = "Approved. Please continue the previous action.";
+          autoResize(); updateSendMode(); form.requestSubmit();
+        } catch (e) { showAppToast("Approve failed: " + (e.message || e)); }
+        card.remove();
+      });
+      card.querySelector(".deny").addEventListener("click", () => {
+        card.remove();
+        appendMessage("system", "Denied — auto-review blocked " + tool);
+      });
+      messagesEl.appendChild(card);
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+    }
+    function maybeShowApprovalsFromText(text) {
+      const raw = String(text || "");
+      if (!/needs_approval|auto_review_blocked|Auto-review is ON/i.test(raw)) return;
+      if (document.querySelector(".approval-card[data-live='1']")) return;
+      let tool = "shell", args = {}, rules = settings.autoReviewRules || [];
+      try {
+        const m = raw.match(/\{[\s\S]*?"needs_approval"\s*:\s*true[\s\S]*?\}/);
+        if (m) {
+          const obj = JSON.parse(m[0]);
+          tool = obj.tool || tool;
+          args = obj.args || {};
+          if (Array.isArray(obj.rules)) rules = obj.rules;
+        }
+      } catch (_) {}
+      appendApprovalCard(tool, args, rules);
+    }
+
+
     function initProfileUI() {
       document.getElementById("profile-close").addEventListener("click", closeProfileSheet);
       document.querySelectorAll("[data-nav]").forEach((btn) => {
@@ -3316,6 +3553,7 @@
           setToggle(el, settings[key]);
           haptic(10);
           if (key === "tzAuto") updateTzControls();
+          syncSettingsToServer({ [key]: settings[key] });
         });
       }
       wireToggle("ps-auto-review", "autoReview");
@@ -3326,6 +3564,7 @@
       document.getElementById("ps-tz-select").addEventListener("change", (e) => {
         settings.timeZone = e.target.value;
         saveSettings();
+        syncSettingsToServer({ timeZone: settings.timeZone });
         document.getElementById("ps-tz-display").textContent = settings.timeZone;
       });
 
@@ -3338,6 +3577,7 @@
         btn.addEventListener("click", () => {
           settings.appearance = btn.dataset.appearance;
           saveSettings();
+          syncSettingsToServer({ appearance: settings.appearance });
           applyAppearance();
           renderAppearanceOpts();
           document.getElementById("ps-appearance-val").textContent = settings.appearance;
@@ -3351,6 +3591,7 @@
         if (!v) return;
         settings.autoReviewRules.push(v);
         saveSettings();
+        syncSettingsToServer({ autoReviewRules: settings.autoReviewRules });
         inp.value = "";
         document.getElementById("ps-rules-count").textContent = String(settings.autoReviewRules.length);
         renderRulesList();
@@ -3390,19 +3631,19 @@
       });
 
       document.getElementById("ps-sign-out").addEventListener("click", () => {
-        if (!confirm("Sign out locally? Clears session tokens in this browser and returns to bots list.")) return;
-        try {
-          Object.keys(localStorage).forEach((k) => {
-            if (/token|session|auth|jwt/i.test(k) && k !== STORAGE_KEY && k !== SETTINGS_KEY) {
-              localStorage.removeItem(k);
-            }
-          });
-          sessionStorage.clear();
-        } catch (_) {}
-        closeProfileSheet();
-        setView("bots");
-        showAppToast("Signed out (local)");
-        haptic(20);
+        if (!confirm("Sign out? You will need to sign in again to use Animal Nitc on this device.")) return;
+        signOut();
+      });
+      document.querySelectorAll("#ps-language-opts [data-language]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          settings.language = btn.dataset.language;
+          saveSettings();
+          syncSettingsToServer({ language: settings.language });
+          renderLanguageOpts();
+          const lv = document.getElementById("ps-language-val");
+          if (lv) lv.textContent = settings.language;
+          haptic(8);
+        });
       });
 
       document.getElementById("ps-user-edit").addEventListener("click", () => {
@@ -3633,10 +3874,12 @@
 
 
     loadSettings();
+    loadSession();
     applyAppearance();
     initProfileUI();
     initBotCtxUI();
     initBotsChrome();
+    initAuthUI();
     loadBots();
     renderBotsList();
     loadConfig();
@@ -3645,6 +3888,16 @@
     updateSendMode();
     autoResize();
     setView("bots");
+    pullSettingsFromServer().then(() => renderProfileMain());
+    if (!isSignedIn()) showAuthScreen();
+    else {
+      settings.profileEmail = authSession.email || settings.profileEmail;
+      settings.profileName = authSession.name || settings.profileName;
+      settings.profileInitials = authSession.initials || settings.profileInitials;
+      saveSettings();
+      renderProfileMain();
+      hideAuthScreen();
+    }
   </script>
 
   <!-- PROFILE SETTINGS SHEET -->
@@ -3716,10 +3969,11 @@
             <span class="ps-value" id="ps-appearance-val">Black</span>
             <span class="ps-chev">›</span>
           </button>
-          <div class="ps-row static">
+          <button type="button" class="ps-row" data-nav="language">
             <span class="ps-label"><span class="t">Language</span></span>
-            <span class="ps-value">System</span>
-          </div>
+            <span class="ps-value" id="ps-language-val">System</span>
+            <span class="ps-chev">›</span>
+          </button>
           <div class="ps-row static">
             <span class="ps-label"><span class="t">Haptics</span></span>
             <button type="button" class="nitc-toggle on" id="ps-haptics" aria-label="Haptics" aria-pressed="true"></button>
@@ -3845,6 +4099,16 @@
         </div>
       </div>
 
+      
+      <div class="profile-stack" data-stack="language">
+        <button type="button" class="ps-sub-back" data-back>‹ Back</button>
+        <div class="ps-sec" style="margin-top:0">Language</div>
+        <div class="ps-card" id="ps-language-opts">
+          <button type="button" class="ps-row" data-language="System"><span class="ps-label"><span class="t">System</span></span><span class="ps-value" data-check></span></button>
+          <button type="button" class="ps-row" data-language="English"><span class="ps-label"><span class="t">English</span></span><span class="ps-value" data-check></span></button>
+        </div>
+      </div>
+
       <div class="profile-stack" data-stack="hidden">
         <button type="button" class="ps-sub-back" data-back>‹ Back</button>
         <div class="ps-sec" style="margin-top:0">Hidden bots</div>
@@ -3871,6 +4135,29 @@
           <button type="button" class="danger" id="ctx-delete"><span class="mi">⌫</span>Delete</button>
         </div>
       </div>
+    </div>
+  </div>
+
+  
+  <div class="auth-screen" id="auth-screen" hidden>
+    <div class="auth-card">
+      <div class="logo" aria-hidden="true">
+        <svg width="28" height="28" viewBox="0 0 64 64"><path fill="#0a0a0a" d="M32 4C22 18 12 30 12 42a20 20 0 0 0 40 0C52 30 42 18 32 4z"/><circle cx="26" cy="28" r="3.2" fill="#34c759"/><circle cx="38" cy="28" r="3.2" fill="#34c759"/></svg>
+      </div>
+      <h2>Sign in to Animal Nitc</h2>
+      <p class="sub">Local account for this device / host</p>
+      <label for="auth-email">Email</label>
+      <input id="auth-email" type="email" autocomplete="username" placeholder="you@example.com" value="polycapsamuel5@gmail.com" />
+      <label for="auth-password">Password</label>
+      <input id="auth-password" type="password" autocomplete="current-password" placeholder="Password" />
+      <label for="auth-pin">Or PIN</label>
+      <input id="auth-pin" type="password" inputmode="numeric" autocomplete="one-time-code" placeholder="4+ digit PIN" />
+      <div class="auth-actions">
+        <button type="button" class="auth-btn" id="auth-login-btn">Sign In</button>
+        <button type="button" class="auth-btn secondary" id="auth-demo-btn">Use demo account</button>
+      </div>
+      <div class="auth-err" id="auth-err"></div>
+      <p class="auth-hint">Demo: polycapsamuel5@gmail.com · password <b>nitc1234</b> or PIN <b>1234</b>. New emails create an account.</p>
     </div>
   </div>
 

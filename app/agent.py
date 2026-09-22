@@ -317,7 +317,24 @@ async def chat(
             last_user = user_content_as_text(m.get("content"))
             break
 
-    working: list[dict[str, Any]] = [{"role": "system", "content": SYSTEM_PROMPT}]
+    system_content = SYSTEM_PROMPT
+    try:
+        from app.runtime_settings import auto_review_enabled, auto_review_rules
+        if auto_review_enabled():
+            rules = auto_review_rules()
+            extra = (
+                "\n\n## Auto-review (ENABLED)\n"
+                "Risky tools (shell, desktop input/open, browser navigate, github, write_file) "
+                "require user approval. If a tool returns needs_approval=true, STOP and tell the "
+                "user clearly what you wanted to run; wait for them to Approve in the UI or reply "
+                "that they approved. Do not invent tool results.\n"
+            )
+            if rules:
+                extra += "User auto-review rules:\n" + "\n".join(f"- {r}" for r in rules) + "\n"
+            system_content = SYSTEM_PROMPT + extra
+    except Exception:
+        pass
+    working: list[dict[str, Any]] = [{"role": "system", "content": system_content}]
     for m in messages:
         role = m.get("role")
         if role in ("user", "assistant", "tool", "system"):

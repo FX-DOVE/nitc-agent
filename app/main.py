@@ -13,7 +13,7 @@ from typing import Any
 import httpx
 import websockets
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from starlette.websockets import WebSocketState
@@ -223,6 +223,206 @@ async def media_screenshot(name: str) -> FileResponse:
     return FileResponse(path, media_type=media)
 
 
+
+
+
+
+# —— Local auth + runtime settings (Profile) ——
+import hashlib
+import hmac
+import secrets as _secrets
+import time as _time
+
+_AUTH_USERS_FILE = "auth_users.json"
+_SESSIONS: dict[str, dict[str, Any]] = {}
+
+
+def _auth_users_path() -> Path:
+    return get_settings().workspace_path / _AUTH_USERS_FILE
+
+
+def _load_users() -> dict[str, Any]:
+    path = _auth_users_path()
+    if not path.is_file():
+        # seed default local account matching Profile defaults
+        users = {
+            "polycapsamuel5@gmail.com": {
+                "email": "polycapsamuel5@gmail.com",
+                "name": "chisom odoh",
+                "initials": "CO",
+                # password: nitc1234 (sha256)
+                "password_sha256": hashlib.sha256(b"nitc1234").hexdigest(),
+                "pin": "1234",
+            }
+        }
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(users, indent=2) + "\n", encoding="utf-8")
+        return users
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _save_users(users: dict[str, Any]) -> None:
+    path = _auth_users_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(users, indent=2) + "\n", encoding="utf-8")
+
+
+def _hash_pw(password: str) -> str:
+    return hashlib.sha256(password.encode("utf-8")).hexdigest()
+
+
+def _make_session(email: str, user: dict[str, Any]) -> str:
+    token = _secrets.token_urlsafe(24)
+    _SESSIONS[token] = {
+        "email": email,
+        "name": user.get("name") or email.split("@")[0],
+        "initials": user.get("initials") or "CO",
+        "exp": _time.time() + 60 * 60 * 24 * 30,
+    }
+    return token
+
+
+def _session_from_request(request: Request) -> dict[str, Any] | None:
+    auth = request.headers.get("authorization") or ""
+    token = ""
+    if auth.lower().startswith("bearer "):
+        token = auth[7:].strip()
+    if not token:
+        token = request.cookies.get("nitc_session") or ""
+    if not token:
+        return None
+    sess = _SESSIONS.get(token)
+    if not sess:
+        return None
+    if float(sess.get("exp") or 0) < _time.time():
+        _SESSIONS.pop(token, None)
+        return None
+    return {"token": token, **sess}
+
+
+class AuthLoginBody(BaseModel):
+    email: str = Field(..., min_length=1, max_length=320)
+    password: str | None = Field(default=None, max_length=200)
+    pin: str | None = Field(default=None, max_length=32)
+
+
+class SettingsPatch(BaseModel):
+    autoReview: bool | None = None
+    autoReviewRules: list[str] | None = None
+    tzAuto: bool | None = None
+    timeZone: str | None = None
+    notifications: bool | None = None
+    appearance: str | None = None
+    language: str | None = None
+    haptics: bool | None = None
+    plugins: dict[str, bool] | None = None
+
+
+class AllowOnceBody(BaseModel):
+    tool: str = Field(..., min_length=1, max_length=64)
+    args: dict[str, Any] = Field(default_factory=dict)
+
+
+@app.get("/api/settings")
+async def api_get_settings() -> dict[str, Any]:
+    from app import runtime_settings as rs
+    data = rs.load_settings()
+    return {k: v for k, v in data.items() if not str(k).startswith("_")}
+
+
+@app.put("/api/settings")
+async def api_put_settings(body: SettingsPatch) -> dict[str, Any]:
+    from app import runtime_settings as rs
+    patch = body.model_dump(exclude_none=True)
+    data = rs.save_settings(patch)
+    return {k: v for k, v in data.items() if not str(k).startswith("_")}
+
+
+@app.post("/api/settings/allow-once")
+async def api_allow_once(body: AllowOnceBody) -> dict[str, Any]:
+    """Grant a one-shot approval for a risky tool (Auto-review)."""
+    from app import runtime_settings as rs
+    token = rs.grant_allow_once(body.tool, body.args or {})
+    return {"ok": True, "token": token, "tool": body.tool}
+
+
+@app.post("/api/auth/login")
+async def api_auth_login(body: AuthLoginBody, response: Response) -> dict[str, Any]:
+    email = body.email.strip().lower()
+    users = _load_users()
+    user = users.get(email)
+    if not user:
+        # allow first-time register with password or pin
+        if not (body.password or body.pin):
+            raise HTTPException(status_code=401, detail="Unknown account — provide password or PIN to create one")
+        name = email.split("@")[0].replace(".", " ").replace("_", " ")
+        parts = [p for p in name.split() if p]
+        initials = ((parts[0][0] if parts else "U") + (parts[1][0] if len(parts) > 1 else "N")).upper()
+        user = {
+            "email": email,
+            "name": name.title(),
+            "initials": initials,
+            "password_sha256": _hash_pw(body.password) if body.password else None,
+            "pin": (body.pin or "").strip() or None,
+        }
+        users[email] = user
+        _save_users(users)
+    else:
+        ok = False
+        if body.password and user.get("password_sha256"):
+            ok = hmac.compare_digest(user["password_sha256"], _hash_pw(body.password))
+        if body.pin and user.get("pin"):
+            ok = ok or hmac.compare_digest(str(user["pin"]), str(body.pin).strip())
+        # demo convenience: default account accepts nitc1234 / 1234 even if file drifted
+        if email == "polycapsamuel5@gmail.com":
+            if body.password == "nitc1234" or body.pin == "1234":
+                ok = True
+        if not ok:
+            raise HTTPException(status_code=401, detail="Invalid email, password, or PIN")
+    token = _make_session(email, user)
+    response.set_cookie(
+        key="nitc_session",
+        value=token,
+        httponly=True,
+        samesite="lax",
+        max_age=60 * 60 * 24 * 30,
+    )
+    return {
+        "ok": True,
+        "token": token,
+        "user": {
+            "email": email,
+            "name": user.get("name"),
+            "initials": user.get("initials") or "CO",
+        },
+    }
+
+
+@app.post("/api/auth/logout")
+async def api_auth_logout(request: Request, response: Response) -> dict[str, Any]:
+    sess = _session_from_request(request)
+    if sess and sess.get("token"):
+        _SESSIONS.pop(sess["token"], None)
+    response.delete_cookie("nitc_session")
+    return {"ok": True}
+
+
+@app.get("/api/auth/me")
+async def api_auth_me(request: Request) -> dict[str, Any]:
+    sess = _session_from_request(request)
+    if not sess:
+        return {"authenticated": False}
+    return {
+        "authenticated": True,
+        "user": {
+            "email": sess.get("email"),
+            "name": sess.get("name"),
+            "initials": sess.get("initials") or "CO",
+        },
+    }
 
 
 class FeedbackBody(BaseModel):
