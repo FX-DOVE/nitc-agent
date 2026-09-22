@@ -9,7 +9,7 @@ export XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
 export XDG_DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
 export XDG_CACHE_HOME="${XDG_CACHE_HOME:-$HOME/.cache}"
 export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/tmp/runtime-desktop}"
-export GTK_THEME="${GTK_THEME:-Greybird}"
+export GTK_THEME="${GTK_THEME:-Greybird-dark}"
 VNC_PASSWORD="${VNC_PASSWORD:-}"
 VNC_NO_PASSWORD="${VNC_NO_PASSWORD:-0}"
 SCREEN_WIDTH="${SCREEN_WIDTH:-1280}"
@@ -92,12 +92,12 @@ fi
 WALL="/opt/nitc-wallpaper/wallpaper.png"
 if command -v hsetroot >/dev/null 2>&1; then
   if [[ -f "$WALL" ]]; then
-    hsetroot -fill "$WALL" || hsetroot -solid "#e8ecf5" || true
+    hsetroot -fill "$WALL" || hsetroot -solid "#0b0e14" || true
   else
-    hsetroot -solid "#e8ecf5" || true
+    hsetroot -solid "#0b0e14" || true
   fi
 elif command -v xsetroot >/dev/null 2>&1; then
-  xsetroot -solid "#e8ecf5" || true
+  xsetroot -solid "#0b0e14" || true
 fi
 
 echo "[entrypoint] Starting XFCE (wm + settings + panel + desktop icons)"
@@ -106,9 +106,9 @@ xfsettingsd --replace >/tmp/xfsettingsd.log 2>&1 &
 sleep 0.4
 # Apply theme via xfconf if available
 if command -v xfconf-query >/dev/null 2>&1; then
-  xfconf-query -c xsettings -p /Net/ThemeName -s Greybird 2>/dev/null || true
-  xfconf-query -c xsettings -p /Net/IconThemeName -s Papirus 2>/dev/null || true
-  xfconf-query -c xfwm4 -p /general/theme -s Greybird 2>/dev/null || true
+  xfconf-query -c xsettings -p /Net/ThemeName -s Greybird-dark 2>/dev/null || true
+  xfconf-query -c xsettings -p /Net/IconThemeName -s Papirus-Dark 2>/dev/null || true
+  xfconf-query -c xfwm4 -p /general/theme -s Greybird-dark 2>/dev/null || true
   xfconf-query -c xfce4-desktop -p /backdrop/screen0/monitor0/workspace0/last-image -s "$WALL" 2>/dev/null || true
 fi
 xfce4-panel --disable-wm-check >/tmp/xfce4-panel.log 2>&1 &

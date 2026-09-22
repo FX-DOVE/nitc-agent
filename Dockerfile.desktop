@@ -1,5 +1,5 @@
 # Interactive Linux desktop for Nitc Agent — polished lean XFCE + Chromium + noVNC
-# Soft wallpaper, Greybird + Papirus, bottom panel with Browser/Terminal/Files.
+# Dark wallpaper, Greybird-dark + Papirus-Dark, bottom panel with Browser/Terminal/Files.
 # Image ~1.5–2GB; fine on a 4GB VPS with mem_limit ~1g and shm_size 256mb.
 FROM debian:bookworm-slim
 

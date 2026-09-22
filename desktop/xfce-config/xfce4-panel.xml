@@ -11,10 +11,10 @@
       <property name="icon-size" type="uint" value="28"/>
       <property name="background-style" type="uint" value="1"/>
       <property name="background-rgba" type="array">
-        <value type="double" value="0.12"/>
-        <value type="double" value="0.14"/>
-        <value type="double" value="0.18"/>
-        <value type="double" value="0.92"/>
+        <value type="double" value="0.05"/>
+        <value type="double" value="0.06"/>
+        <value type="double" value="0.09"/>
+        <value type="double" value="0.96"/>
       </property>
       <property name="enter-opacity" type="uint" value="100"/>
       <property name="leave-opacity" type="uint" value="100"/>
