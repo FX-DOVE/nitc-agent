@@ -51,6 +51,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-venv \
     procps \
     libglib2.0-bin \
+    shared-mime-info \
+    librsvg2-common \
     hsetroot \
     && rm -rf /var/lib/apt/lists/* \
     && ln -sf /usr/bin/chromium /usr/local/bin/chromium-browser || true \

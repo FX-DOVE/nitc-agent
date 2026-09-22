@@ -105,9 +105,24 @@ fi
 xfce4-panel --disable-wm-check >/tmp/xfce4-panel.log 2>&1 &
 xfdesktop --disable-wm-check >/tmp/xfdesktop.log 2>&1 &
 sleep 1.5
-# Re-apply wallpaper through xfdesktop once it is up
-if [[ -f "$WALL" ]] && command -v xfdesktop >/dev/null 2>&1; then
-  xfdesktop --reload 2>/dev/null || true
+# Xvfb often registers as monitorscreen; xfdesktop may default to xfce-shapes.svg.
+# Force our soft wallpaper onto every backdrop last-image key, then restart xfdesktop.
+if [[ -f "$WALL" ]] && command -v xfconf-query >/dev/null 2>&1; then
+  while IFS= read -r prop; do
+    [[ -n "$prop" ]] || continue
+    xfconf-query -c xfce4-desktop -p "$prop" -n -t string -s "$WALL" 2>/dev/null       || xfconf-query -c xfce4-desktop -p "$prop" -s "$WALL" 2>/dev/null || true
+  done < <(xfconf-query -c xfce4-desktop -l 2>/dev/null | grep last-image || true)
+  while IFS= read -r prop; do
+    [[ -n "$prop" ]] || continue
+    xfconf-query -c xfce4-desktop -p "$prop" -n -t int -s 5 2>/dev/null       || xfconf-query -c xfce4-desktop -p "$prop" -s 5 2>/dev/null || true
+  done < <(xfconf-query -c xfce4-desktop -l 2>/dev/null | grep image-style || true)
+fi
+pkill -x xfdesktop 2>/dev/null || true
+sleep 0.3
+xfdesktop --disable-wm-check >/tmp/xfdesktop.log 2>&1 &
+sleep 0.8
+if command -v hsetroot >/dev/null 2>&1 && [[ -f "$WALL" ]]; then
+  hsetroot -fill "$WALL" || true
 fi
 
 echo "[entrypoint] Starting x11vnc on :${VNC_PORT}"
