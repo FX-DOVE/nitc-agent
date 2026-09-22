@@ -223,6 +223,37 @@ async def media_screenshot(name: str) -> FileResponse:
     return FileResponse(path, media_type=media)
 
 
+
+
+class FeedbackBody(BaseModel):
+    message: str = Field(..., min_length=1, max_length=8000)
+    email: str | None = None
+    name: str | None = None
+    version: str | None = None
+
+
+@app.post("/api/feedback")
+async def api_feedback(body: FeedbackBody) -> dict[str, Any]:
+    """Append user feedback as a JSON line under workspace/feedback.jsonl."""
+    settings = get_settings()
+    path = settings.workspace_path / "feedback.jsonl"
+    import time as _time
+    rec = {
+        "ts": _time.strftime("%Y-%m-%dT%H:%M:%SZ", _time.gmtime()),
+        "message": body.message.strip(),
+        "email": (body.email or "").strip() or None,
+        "name": (body.name or "").strip() or None,
+        "version": body.version or __version__,
+    }
+    try:
+        with path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    except OSError as exc:
+        logger.exception("feedback write failed")
+        raise HTTPException(status_code=500, detail=f"Could not save feedback: {exc}") from exc
+    return {"ok": True}
+
+
 @app.post("/api/chat", response_model=ChatResponse)
 async def api_chat(body: ChatRequest) -> ChatResponse:
     messages: list[dict[str, Any]] = []
