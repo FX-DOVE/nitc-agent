@@ -37,6 +37,9 @@ Thumbs.db
 # Agent runtime
 workspace/*
 !workspace/.gitkeep
+!workspace/uploads/
+workspace/uploads/*
+!workspace/uploads/.gitkeep
 *.log
 screenshots/
 playwright-report/

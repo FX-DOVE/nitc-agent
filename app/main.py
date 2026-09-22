@@ -1,4 +1,4 @@
-"""FastAPI entrypoint: health, chat API, noVNC proxy, media, and static chat UI."""
+"""FastAPI entrypoint: health, chat API, uploads, noVNC proxy, media, and static chat UI."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from typing import Any
 
 import httpx
 import websockets
-from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -18,6 +18,7 @@ from starlette.websockets import WebSocketState
 
 from app import __version__
 from app.agent import chat as agent_chat
+from app.attachments import MAX_UPLOAD_BYTES, resolve_upload, save_upload, uploads_root
 from app.config import get_settings
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -46,7 +47,16 @@ app = FastAPI(
 
 class ChatMessage(BaseModel):
     role: str
-    content: str = ""
+    content: Any = ""
+
+
+class AttachmentRef(BaseModel):
+    id: str | None = None
+    path: str | None = None
+    name: str | None = None
+    mime: str | None = None
+    size: int | None = None
+    url: str | None = None
 
 
 class ChatRequest(BaseModel):
@@ -54,6 +64,10 @@ class ChatRequest(BaseModel):
     message: str | None = Field(
         default=None,
         description="Convenience: single user message (appended if messages empty or in addition)",
+    )
+    attachments: list[AttachmentRef] = Field(
+        default_factory=list,
+        description="Files previously uploaded via /api/uploads; applied to the latest user turn",
     )
 
 
@@ -86,6 +100,7 @@ async def health() -> dict[str, Any]:
         "desktop_api_url": settings.desktop_api_url,
         "novnc_public_url": settings.novnc_public_url,
         "novnc_embed_url": _novnc_embed_url(),
+        "max_upload_bytes": MAX_UPLOAD_BYTES,
     }
 
 
@@ -103,7 +118,43 @@ async def api_config() -> dict[str, Any]:
         "novnc_direct_url": f"{direct}/vnc.html?autoconnect=1&resize=scale" if direct else embed,
         "novnc_embed_url": embed,
         "model": settings.model,
+        "max_upload_bytes": MAX_UPLOAD_BYTES,
     }
+
+
+@app.post("/api/uploads")
+async def api_upload(file: UploadFile = File(...)) -> dict[str, Any]:
+    """Save an uploaded file under workspace/uploads and return metadata."""
+    raw = await file.read()
+    try:
+        meta = save_upload(raw, file.filename or "upload.bin", file.content_type)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except OSError as exc:
+        logger.exception("upload write failed")
+        raise HTTPException(status_code=500, detail=f"Could not save upload: {exc}") from exc
+    return meta
+
+
+@app.get("/api/media/uploads/{name}")
+async def media_upload(name: str) -> FileResponse:
+    """Serve a previously uploaded file from workspace/uploads/ (path-safe)."""
+    if not name or name != Path(name).name or ".." in name or "/" in name or "\\" in name:
+        raise HTTPException(status_code=400, detail="Invalid upload name")
+    if not re.fullmatch(r"[A-Za-z0-9._-]+", name):
+        raise HTTPException(status_code=400, detail="Invalid upload name")
+
+    uploads = uploads_root()
+    path = (uploads / name).resolve()
+    if not str(path).startswith(str(uploads.resolve()) + "/") and path != uploads.resolve():
+        raise HTTPException(status_code=403, detail="Path escape blocked")
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="Upload not found")
+
+    import mimetypes
+
+    media, _ = mimetypes.guess_type(name)
+    return FileResponse(path, media_type=media or "application/octet-stream", filename=name)
 
 
 @app.get("/api/media/screenshots/{name}")
@@ -138,22 +189,42 @@ async def media_screenshot(name: str) -> FileResponse:
 
 @app.post("/api/chat", response_model=ChatResponse)
 async def api_chat(body: ChatRequest) -> ChatResponse:
-    messages: list[dict[str, Any]] = [m.model_dump() for m in body.messages]
+    messages: list[dict[str, Any]] = []
+    for m in body.messages:
+        messages.append({"role": m.role, "content": m.content})
     if body.message:
         messages.append({"role": "user", "content": body.message})
     if not messages:
         raise HTTPException(status_code=400, detail="Provide messages or message")
 
-    cleaned = []
+    cleaned: list[dict[str, Any]] = []
     for m in messages:
-        if m.get("role") in ("user", "assistant") and isinstance(m.get("content"), str):
-            cleaned.append({"role": m["role"], "content": m["content"]})
+        role = m.get("role")
+        content = m.get("content")
+        if role not in ("user", "assistant"):
+            continue
+        if isinstance(content, str):
+            cleaned.append({"role": role, "content": content})
+        elif isinstance(content, list):
+            # multimodal parts from client (rare); keep as-is
+            cleaned.append({"role": role, "content": content})
+        else:
+            cleaned.append({"role": role, "content": str(content or "")})
 
     if not cleaned or cleaned[-1]["role"] != "user":
         raise HTTPException(status_code=400, detail="Last message must be from user")
 
+    att_dicts = [a.model_dump(exclude_none=True) for a in body.attachments]
+    # Drop dangling refs early
+    if att_dicts:
+        valid = []
+        for a in att_dicts:
+            if resolve_upload(a) is not None or a.get("path") or a.get("id"):
+                valid.append(a)
+        att_dicts = valid
+
     try:
-        result = await agent_chat(cleaned)
+        result = await agent_chat(cleaned, attachments=att_dicts or None)
     except Exception as exc:  # noqa: BLE001
         logger.exception("chat failed")
         raise HTTPException(status_code=500, detail=str(exc)) from exc
@@ -255,6 +326,7 @@ async def novnc_ws_proxy(websocket: WebSocket, full_path: str) -> None:
         ) as upstream:
             # Accept only after upstream is up, with matching subprotocol for noVNC.
             await websocket.accept(subprotocol=chosen)
+
             async def client_to_upstream() -> None:
                 try:
                     while True:

@@ -11,6 +11,7 @@ from typing import Any
 
 import httpx
 
+from app.attachments import enrich_user_message, user_content_as_text
 from app.config import get_settings
 from app.tools import get_openai_tools, run_tool
 
@@ -25,6 +26,12 @@ SYSTEM_PROMPT = """You are Nitc Agent — a capable, human-like colleague who ha
 - Prefer clarifying questions when requirements are ambiguous (especially video editing, Flow/generative video, websites, design briefs, or multi-step projects). Ask what success looks like before diving deep.
 - Write for readability: short paragraphs, bullets for lists, **bold** for key labels or paths, headings when structuring longer answers. Avoid walls of text. Stay conversational — not a lecture.
 - Be honest about limits (sandbox, missing logins, tool failures). Never invent tool results.
+
+## Attachments
+- Users may attach images, documents, code, or audio. Attachment paths are under the workspace (`uploads/...`).
+- Image previews may arrive as multimodal `image_url` parts — describe and act on them.
+- Text/code excerpts may be inlined; larger or binary files: use `read_file` / `shell` on the given path.
+- Audio may include a transcript; if not, acknowledge the file at the given path.
 
 ## Tools you have
 - `shell` — run commands in the sandbox workspace
@@ -108,7 +115,7 @@ def _maybe_inject_resume(messages: list[dict[str, Any]]) -> list[dict[str, Any]]
     last = messages[-1]
     if last.get("role") != "user":
         return messages
-    raw = (last.get("content") or "").strip()
+    raw = user_content_as_text(last.get("content")).strip()
     if raw.lower() not in _RESUME_TOKENS:
         return messages
 
@@ -248,7 +255,30 @@ def _ensure_reply_mentions_images(reply: str, images: list[str]) -> str:
     return out
 
 
-async def chat(messages: list[dict[str, Any]]) -> dict[str, Any]:
+
+def _flatten_messages_for_text_only(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Convert multimodal user content parts to plain text (fallback when vision unsupported)."""
+    out: list[dict[str, Any]] = []
+    for m in messages:
+        content = m.get("content")
+        if isinstance(content, list):
+            text = user_content_as_text(content)
+            # note dropped images
+            n_img = sum(1 for p in content if isinstance(p, dict) and p.get("type") == "image_url")
+            if n_img:
+                text = (text + f"\n\n({n_img} image attachment(s) were provided; model has no vision — use workspace paths above).").strip()
+            nm = dict(m)
+            nm["content"] = text
+            out.append(nm)
+        else:
+            out.append(m)
+    return out
+
+
+async def chat(
+    messages: list[dict[str, Any]],
+    attachments: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     """
     Run the agent loop.
 
@@ -269,11 +299,19 @@ async def chat(messages: list[dict[str, Any]]) -> dict[str, Any]:
             "images": [],
         }
 
+    # Enrich the latest user turn with attachment context (text excerpts / vision / audio notes).
+    if attachments and messages and messages[-1].get("role") == "user":
+        last = messages[-1]
+        base_text = user_content_as_text(last.get("content"))
+        enriched = await enrich_user_message(base_text, attachments)
+        messages = list(messages)
+        messages[-1] = enriched
+
     messages = _maybe_inject_resume(messages)
     last_user = ""
     for m in reversed(messages):
         if m.get("role") == "user":
-            last_user = m.get("content") or ""
+            last_user = user_content_as_text(m.get("content"))
             break
 
     working: list[dict[str, Any]] = [{"role": "system", "content": SYSTEM_PROMPT}]
@@ -306,12 +344,37 @@ async def chat(messages: list[dict[str, Any]]) -> dict[str, Any]:
             resp = await client.post(url, headers=headers, json=payload)
             if resp.status_code >= 400:
                 err_text = resp.text[:2000]
-                return {
-                    "reply": f"LLM API error {resp.status_code}: {err_text}",
-                    "messages": messages,
-                    "tool_rounds": tool_rounds,
-                    "images": collected_images,
-                }
+                has_multi = any(isinstance(m.get("content"), list) for m in working)
+                lower_err = err_text.lower()
+                vision_hint = any(
+                    k in lower_err
+                    for k in ("image", "vision", "multimodal", "content", "invalid", "unsupported")
+                )
+                if has_multi and vision_hint:
+                    logger.info("multimodal rejected by API; retrying text-only")
+                    working[:] = _flatten_messages_for_text_only(working)
+                    payload = {
+                        "model": settings.model,
+                        "messages": working,
+                        "tools": tools,
+                        "tool_choice": "auto",
+                    }
+                    resp = await client.post(url, headers=headers, json=payload)
+                    if resp.status_code >= 400:
+                        err_text = resp.text[:2000]
+                        return {
+                            "reply": f"LLM API error {resp.status_code}: {err_text}",
+                            "messages": messages,
+                            "tool_rounds": tool_rounds,
+                            "images": collected_images,
+                        }
+                else:
+                    return {
+                        "reply": f"LLM API error {resp.status_code}: {err_text}",
+                        "messages": messages,
+                        "tool_rounds": tool_rounds,
+                        "images": collected_images,
+                    }
 
             data = resp.json()
             try:
