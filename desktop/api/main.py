@@ -328,56 +328,60 @@ async def get_clipboard() -> dict[str, Any]:
     return {"ok": True, "text": text_out, "error": err_msg or None}
 
 
+async def _pipe_clipboard(cmd: list[str], payload: str, *, allow_hang: bool = False) -> None:
+    """Write text to an xclip/xsel process. xclip may keep running as clipboard owner."""
+    env = _env()
+    proc = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdin=asyncio.subprocess.PIPE,
+        stdout=asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.PIPE,
+        env=env,
+    )
+    data = payload.encode("utf-8", errors="replace")
+    try:
+        _, err_b = await asyncio.wait_for(proc.communicate(data), timeout=2.0)
+    except asyncio.TimeoutError:
+        # xclip often stays alive to serve CLIPBOARD; stdin is already consumed.
+        if allow_hang:
+            return
+        try:
+            proc.kill()
+        except ProcessLookupError:
+            pass
+        try:
+            await proc.wait()
+        except ProcessLookupError:
+            pass
+        raise HTTPException(status_code=504, detail=f"{cmd[0]} timed out")
+    if (proc.returncode or 0) != 0:
+        # Some xclip builds exit non-zero even after a successful handoff; verify below.
+        err = (err_b or b"").decode("utf-8", errors="replace")[:300]
+        if not allow_hang:
+            raise HTTPException(status_code=500, detail=f"{cmd[0]} failed: {err}")
+
+
 @app.post("/clipboard")
 async def set_clipboard(body: ClipboardBody) -> dict[str, Any]:
-    """Write text to the X11 clipboard and optionally type it is left to /type."""
+    """Write text to the X11 clipboard (CLIPBOARD + PRIMARY)."""
     payload = body.text if body.text is not None else ""
-    env = _env()
-    if shutil.which("xclip"):
-        proc = await asyncio.create_subprocess_exec(
-            "xclip", "-selection", "clipboard", "-i",
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            env=env,
+    # Prefer xsel — it exits after setting. Fall back to xclip (may hang as owner).
+    if shutil.which("xsel"):
+        await _pipe_clipboard(["xsel", "--clipboard", "--input"], payload, allow_hang=False)
+        try:
+            await _pipe_clipboard(["xsel", "--primary", "--input"], payload, allow_hang=False)
+        except HTTPException:
+            pass
+    elif shutil.which("xclip"):
+        await _pipe_clipboard(
+            ["xclip", "-selection", "clipboard", "-i"], payload, allow_hang=True
         )
         try:
-            _, err_b = await asyncio.wait_for(proc.communicate(payload.encode("utf-8", errors="replace")), timeout=5.0)
-        except asyncio.TimeoutError:
-            proc.kill()
-            await proc.wait()
-            raise HTTPException(status_code=504, detail="xclip timed out")
-        if (proc.returncode or 0) != 0:
-            raise HTTPException(status_code=500, detail=f"xclip failed: {err_b.decode('utf-8', errors='replace')[:300]}")
-        # Also set primary for middle-click paste compatibility
-        proc2 = await asyncio.create_subprocess_exec(
-            "xclip", "-selection", "primary", "-i",
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.DEVNULL,
-            env=env,
-        )
-        try:
-            await asyncio.wait_for(proc2.communicate(payload.encode("utf-8", errors="replace")), timeout=5.0)
-        except asyncio.TimeoutError:
-            proc2.kill()
-            await proc2.wait()
-    elif shutil.which("xsel"):
-        proc = await asyncio.create_subprocess_exec(
-            "xsel", "--clipboard", "--input",
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            env=env,
-        )
-        try:
-            _, err_b = await asyncio.wait_for(proc.communicate(payload.encode("utf-8", errors="replace")), timeout=5.0)
-        except asyncio.TimeoutError:
-            proc.kill()
-            await proc.wait()
-            raise HTTPException(status_code=504, detail="xsel timed out")
-        if (proc.returncode or 0) != 0:
-            raise HTTPException(status_code=500, detail=f"xsel failed: {err_b.decode('utf-8', errors='replace')[:300]}")
+            await _pipe_clipboard(
+                ["xclip", "-selection", "primary", "-i"], payload, allow_hang=True
+            )
+        except HTTPException:
+            pass
     else:
         raise HTTPException(status_code=500, detail="Neither xclip nor xsel available")
     return {"ok": True, "text_len": len(payload)}
