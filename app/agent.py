@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import logging
+import re
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -14,31 +16,195 @@ from app.tools import get_openai_tools, run_tool
 
 logger = logging.getLogger("nitc.agent")
 
-SYSTEM_PROMPT = """You are Nitc Agent, a capable self-hosted AI assistant with a sandboxed computer, an interactive Linux desktop the user can watch, a headless browser, and GitHub tools.
+JOB_STATE_FILE = ".nitc_job.json"
 
-You can:
-- Run shell commands in your sandbox workspace (`shell`)
-- Read, write, and list files under the workspace
-- Drive the **interactive desktop** (user-visible via noVNC): `desktop_screenshot`, `desktop_click`, `desktop_type`, `desktop_hotkey`, `desktop_scroll`, `desktop_open_browser`
-- Browse quickly with headless Playwright: `browser_navigate`, `browser_get_text`, `browser_screenshot`
-- Interact with GitHub via the `gh` CLI (`github_run`)
+SYSTEM_PROMPT = """You are Nitc Agent — a capable, human-like colleague who happens to have a sandboxed Linux computer the user can watch live (Computer / noVNC). You think carefully, communicate clearly, and actually use your tools. You do not pretend to click, type, or browse: if a GUI or computer action is needed, call the real tools.
 
-Guidelines:
-- Be concise and practical.
-- Prefer **desktop computer-use** (`desktop_*`) for GUI tasks, visual verification, filling forms the user should see, or anything interactive.
-- Prefer **Playwright** (`browser_*`) for quick headless scrapes, fetching page text, or when you only need content — not a live desktop session.
-- Prefer workspace-relative paths; never try to escape the sandbox.
-- After using tools, summarize results clearly for the user.
-- If a tool fails, explain briefly and try an alternative when reasonable.
+## Personality & communication
+- Act like a sharp, reliable teammate: warm, direct, and practical — not robotic or overly formal.
+- Prefer clarifying questions when requirements are ambiguous (especially video editing, Flow/generative video, websites, design briefs, or multi-step projects). Ask what success looks like before diving deep.
+- Write for readability: short paragraphs, bullets for lists, **bold** for key labels or paths, headings when structuring longer answers. Avoid walls of text. Stay conversational — not a lecture.
+- Be honest about limits (sandbox, missing logins, tool failures). Never invent tool results.
 
-Human-like computer use (Phase 3 groundwork):
-- For GUI work: **screenshot first** (`desktop_screenshot`) to see the screen, then act (`click`/`type`/`hotkey`/`scroll`/`open_browser`), then **screenshot again to verify**.
-- Narrate briefly what you see and what you will do next — like a careful human operator.
-- If login, 2FA, CAPTCHA, payment, or other user-only steps appear: **stop and ask the user** to complete them in the Computer view, then continue after they confirm.
-- Screenshots are saved under workspace/screenshots/ and **shown inline in chat** via `/api/media/screenshots/...`. After a successful screenshot, briefly mention what is visible; the UI also embeds the image automatically.
+## Tools you have
+- `shell` — run commands in the sandbox workspace
+- Files — read, write, list under the workspace (prefer relative paths; never escape the sandbox)
+- **Interactive desktop** (user-visible via noVNC): `desktop_screenshot`, `desktop_click`, `desktop_type`, `desktop_hotkey`, `desktop_scroll`, `desktop_open_browser`
+- Headless Playwright: `browser_navigate`, `browser_get_text`, `browser_screenshot` — for quick scrapes / page text when the user does not need to watch
+- GitHub via `gh`: `github_run`
+
+## When to use which
+- Prefer **desktop_*** for GUI tasks, visual verification, forms the user should see, or anything interactive.
+- Prefer **browser_*** for quick headless content fetches when a live session is unnecessary.
+- Use tools aggressively when they help; do not claim you “opened Chrome” or “clicked Save” without calling the tool.
+
+## GUI / computer-use loop (mandatory for visual work)
+1. **Screenshot** first (`desktop_screenshot`) to see the real screen.
+2. **Plan** briefly what you will do next.
+3. **Act** (`click` / `type` / `hotkey` / `scroll` / `open_browser`).
+4. **Verify** with another screenshot.
+5. Narrate briefly what you see and what you will do — like a careful human operator.
+6. If login, 2FA, CAPTCHA, payment, or other user-only steps appear: **stop and ask the user** to finish them in the Computer view. When they reply “done” or “continue”, resume the **same job** from where you left off (do not restart from scratch unless they ask).
+7. Screenshots land under workspace/screenshots/ and appear inline in chat via `/api/media/screenshots/...`. After a successful shot, briefly say what is visible; the UI embeds the image automatically.
+
+## Job continuity
+- For multi-step GUI or project work, keep a short mental/job summary (goal, last step, next step, blockers).
+- When you pause for the user (login/2FA/etc.), state clearly what you need and that you will continue after they say **done**.
+- If a resume context for a saved job is prepended to the user message, honor it and continue that job.
+
+## Response style checklist
+- Short paragraphs; bullets when listing options or steps
+- **Bold** key labels (software names, paths, decisions)
+- Markdown is rendered in the chat UI — use it
+- After tools, summarize results clearly for the user
+- If a tool fails, explain briefly and try an alternative when reasonable
 """
 
+
 _SCREENSHOT_TOOLS = frozenset({"desktop_screenshot", "browser_screenshot"})
+_RESUME_TOKENS = frozenset({"done", "continue"})
+
+
+def _job_state_path() -> Path:
+    return get_settings().workspace_path / JOB_STATE_FILE
+
+
+def load_job_state() -> dict[str, Any] | None:
+    path = _job_state_path()
+    if not path.is_file():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else None
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def save_job_state(state: dict[str, Any]) -> None:
+    path = _job_state_path()
+    try:
+        payload = {
+            **state,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    except OSError as exc:
+        logger.warning("could not save job state: %s", exc)
+
+
+def clear_job_state() -> None:
+    path = _job_state_path()
+    try:
+        if path.is_file():
+            path.unlink()
+    except OSError:
+        pass
+
+
+def _maybe_inject_resume(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """If the latest user message is exactly 'done' or 'continue', prepend job resume context."""
+    if not messages:
+        return messages
+    last = messages[-1]
+    if last.get("role") != "user":
+        return messages
+    raw = (last.get("content") or "").strip()
+    if raw.lower() not in _RESUME_TOKENS:
+        return messages
+
+    state = load_job_state()
+    if not state:
+        return messages
+
+    summary = state.get("summary") or state.get("goal") or "(no summary)"
+    last_step = state.get("last_step") or ""
+    next_step = state.get("next_step") or ""
+    blocker = state.get("blocker") or ""
+    parts = [
+        "[Resume context — user said they are ready to continue]",
+        f"Goal: {summary}",
+    ]
+    if last_step:
+        parts.append(f"Last step: {last_step}")
+    if next_step:
+        parts.append(f"Next step: {next_step}")
+    if blocker:
+        parts.append(f"Was blocked on: {blocker}")
+    parts.append(
+        "Continue this same job from where you left off. Screenshot the desktop if needed, then proceed."
+    )
+    resume_block = "\n".join(parts)
+    out = list(messages)
+    out[-1] = {
+        "role": "user",
+        "content": f"{resume_block}\n\nUser message: {raw}",
+    }
+    return out
+
+
+def _extract_job_state_from_reply(reply: str) -> None:
+    """Optionally persist a lightweight job_state fenced block the model may emit."""
+    # Accept optional ```job_state ... ``` JSON for continuity; strip is handled by caller if needed.
+    m = re.search(r"```job_state\s*(\{.*?\})\s*```", reply, re.DOTALL | re.IGNORECASE)
+    if not m:
+        return
+    try:
+        data = json.loads(m.group(1))
+        if isinstance(data, dict) and (data.get("goal") or data.get("summary")):
+            save_job_state(
+                {
+                    "summary": data.get("summary") or data.get("goal") or "",
+                    "goal": data.get("goal") or data.get("summary") or "",
+                    "last_step": data.get("last_step") or "",
+                    "next_step": data.get("next_step") or "",
+                    "blocker": data.get("blocker") or "",
+                }
+            )
+    except (json.JSONDecodeError, TypeError):
+        pass
+
+
+def _strip_job_state_fence(reply: str) -> str:
+    return re.sub(
+        r"\n*```job_state\s*\{.*?\}\s*```\n*",
+        "\n",
+        reply,
+        flags=re.DOTALL | re.IGNORECASE,
+    ).strip()
+
+
+def _heuristic_save_job_on_user_wait(reply: str, user_text: str) -> None:
+    """If the assistant asks the user to complete login/2FA, snapshot a simple job state."""
+    lower = (reply or "").lower()
+    wait_markers = (
+        "log in",
+        "login",
+        "sign in",
+        "2fa",
+        "two-factor",
+        "captcha",
+        "when you're done",
+        "when you are done",
+        "say done",
+        "reply done",
+        "computer view",
+        "complete it in the computer",
+    )
+    if not any(m in lower for m in wait_markers):
+        return
+    # Keep prior state if richer; otherwise seed from recent user ask.
+    prev = load_job_state() or {}
+    save_job_state(
+        {
+            "summary": prev.get("summary")
+            or prev.get("goal")
+            or (user_text[:240] if user_text else "Continue desktop task"),
+            "goal": prev.get("goal") or (user_text[:240] if user_text else ""),
+            "last_step": prev.get("last_step") or "Paused for user action",
+            "next_step": prev.get("next_step") or "Resume after user confirms done",
+            "blocker": "Waiting for user (login / 2FA / confirmation)",
+        }
+    )
 
 
 def _image_urls_from_tool_result(name: str, result: str) -> list[str]:
@@ -50,7 +216,6 @@ def _image_urls_from_tool_result(name: str, result: str) -> list[str]:
     except (json.JSONDecodeError, TypeError):
         return []
     if not isinstance(data, dict) or not data.get("ok", True):
-        # desktop/browser return ok:false on failure; skip
         if data.get("ok") is False:
             return []
 
@@ -62,7 +227,6 @@ def _image_urls_from_tool_result(name: str, result: str) -> list[str]:
 
     path = data.get("path")
     if isinstance(path, str) and path:
-        # path like screenshots/foo.png or absolute ending in screenshots/foo.png
         fname = Path(path).name
         if fname.lower().endswith((".png", ".jpg", ".jpeg", ".webp", ".gif")):
             media = f"/api/media/screenshots/{fname}"
@@ -104,6 +268,13 @@ async def chat(messages: list[dict[str, Any]]) -> dict[str, Any]:
             "tool_rounds": 0,
             "images": [],
         }
+
+    messages = _maybe_inject_resume(messages)
+    last_user = ""
+    for m in reversed(messages):
+        if m.get("role") == "user":
+            last_user = m.get("content") or ""
+            break
 
     working: list[dict[str, Any]] = [{"role": "system", "content": SYSTEM_PROMPT}]
     for m in messages:
@@ -166,6 +337,9 @@ async def chat(messages: list[dict[str, Any]]) -> dict[str, Any]:
             if not tool_calls:
                 reply = (msg.get("content") or "").strip() or "(empty response)"
                 reply = _ensure_reply_mentions_images(reply, collected_images)
+                _extract_job_state_from_reply(reply)
+                reply = _strip_job_state_fence(reply)
+                _heuristic_save_job_on_user_wait(reply, last_user)
                 return {
                     "reply": reply,
                     "messages": [m for m in working if m.get("role") != "system"],
@@ -215,6 +389,9 @@ async def chat(messages: list[dict[str, Any]]) -> dict[str, Any]:
             data.get("choices", [{}])[0].get("message", {}).get("content") or ""
         ).strip() or "Stopped after maximum tool rounds."
         reply = _ensure_reply_mentions_images(reply, collected_images)
+        _extract_job_state_from_reply(reply)
+        reply = _strip_job_state_fence(reply)
+        _heuristic_save_job_on_user_wait(reply, last_user)
         return {
             "reply": reply,
             "messages": [m for m in working if m.get("role") != "system"],
