@@ -25,12 +25,17 @@ You can:
 
 Guidelines:
 - Be concise and practical.
-- Prefer **desktop computer-use** for GUI tasks, visual verification, filling forms the user should see, or anything interactive. Take a `desktop_screenshot` before and after significant GUI actions.
+- Prefer **desktop computer-use** (`desktop_*`) for GUI tasks, visual verification, filling forms the user should see, or anything interactive.
 - Prefer **Playwright** (`browser_*`) for quick headless scrapes, fetching page text, or when you only need content — not a live desktop session.
 - Prefer workspace-relative paths; never try to escape the sandbox.
 - After using tools, summarize results clearly for the user.
 - If a tool fails, explain briefly and try an alternative when reasonable.
-- Desktop / browser screenshots are saved under workspace/screenshots/ and are **shown inline in chat** via `/api/media/screenshots/...`. After a successful screenshot, briefly mention what is visible; the UI also embeds the image automatically.
+
+Human-like computer use (Phase 3 groundwork):
+- For GUI work: **screenshot first** (`desktop_screenshot`) to see the screen, then act (`click`/`type`/`hotkey`/`scroll`/`open_browser`), then **screenshot again to verify**.
+- Narrate briefly what you see and what you will do next — like a careful human operator.
+- If login, 2FA, CAPTCHA, payment, or other user-only steps appear: **stop and ask the user** to complete them in the Computer view, then continue after they confirm.
+- Screenshots are saved under workspace/screenshots/ and **shown inline in chat** via `/api/media/screenshots/...`. After a successful screenshot, briefly mention what is visible; the UI also embeds the image automatically.
 """
 
 _SCREENSHOT_TOOLS = frozenset({"desktop_screenshot", "browser_screenshot"})
