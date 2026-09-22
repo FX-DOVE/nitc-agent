@@ -1,23 +1,41 @@
 # Nitc Agent
 
-**Phase 1** — self-hosted AI agent with a web chat UI, tool-calling loop, sandboxed shell/filesystem, headless browser (Playwright), and GitHub (`gh`) tooling.
+Self-hosted AI agent with a web chat UI, tool-calling loop, sandboxed shell/filesystem, **interactive Linux desktop (noVNC)**, headless browser (Playwright), and GitHub (`gh`) tooling.
 
-Built from scratch as clean open-source software (MIT). Not affiliated with any proprietary agent product.
+**Phase 2** adds a persistent, viewable/clickable desktop the user can watch and take over — open-source from scratch (MIT). Not affiliated with any proprietary agent product.
 
-## Features (Phase 1)
+## Features
 
-| Capability | Tools |
+| Capability | Tools / UI |
 |---|---|
-| Chat UI | Simple SPA served by FastAPI at `/` |
-| Agent brain | OpenAI-compatible tool-calling loop (max ~15 rounds) |
-| Computer | `shell`, `read_file`, `write_file`, `list_dir` (workspace-scoped) |
-| Browser | `browser_navigate`, `browser_get_text`, `browser_screenshot` (Playwright Chromium) |
-| GitHub | `github_run` — wraps `gh` CLI with `GITHUB_TOKEN` |
-| Extensibility | Pluggable registry in `app/tools/__init__.py` (`register_tool`) |
+| Chat UI | SPA at `/` with **Chat** and **Computer** tabs |
+| Agent brain | OpenAI-compatible tool-calling loop |
+| Computer (CLI) | `shell`, `read_file`, `write_file`, `list_dir` (workspace-scoped) |
+| **Interactive desktop** | `desktop_screenshot`, `desktop_click`, `desktop_type`, `desktop_hotkey`, `desktop_scroll`, `desktop_open_browser` |
+| Browser (headless) | `browser_navigate`, `browser_get_text`, `browser_screenshot` (Playwright) |
+| GitHub | `github_run` — wraps `gh` with `GITHUB_TOKEN` |
+| Watch / take over | noVNC on port **6080** (iframe in Computer tab) |
 
-Shell and browser run **inside the Docker container**. The agent workspace is mounted at `./workspace`.
+## Architecture (Phase 2)
 
-## Quick start (VPS / local)
+```
+┌────────────────────┐     Docker network `nitc`     ┌──────────────────────────┐
+│  agent (:8080)     │  HTTP computer tools           │  desktop                 │
+│  FastAPI chat UI   │ ────────────────────────────► │  Xvfb + openbox          │
+│  + tool loop       │    http://desktop:7090         │  Chromium, xdotool       │
+│                    │                                │  desktop-api (:7090)     │
+│                    │   shared volume ./workspace    │  x11vnc + noVNC (:6080)  │
+└────────────────────┘ ◄────────────────────────────► └──────────────────────────┘
+         ▲                                                        ▲
+         │ browser :8080                                          │ browser :6080
+         └──────────────── user ──────────────────────────────────┘
+```
+
+- **Preferred pattern:** computer-use tools in the agent call a small **desktop-api** (FastAPI) *inside* the desktop container. That avoids fragile cross-container `DISPLAY` networking.
+- Workspace files are shared via `./workspace` so screenshots and downloads persist for both services.
+- Headless Playwright stays on the **agent** image for fast scrapes; GUI work uses the **desktop**.
+
+## Quick start
 
 ### 1. Clone
 
@@ -26,110 +44,106 @@ git clone https://github.com/FX-DOVE/nitc-agent.git
 cd nitc-agent
 ```
 
-### 2. Configure environment
+### 2. Configure
 
 ```bash
 cp .env.example .env
-# Edit .env — at minimum set OPENAI_API_KEY
+# Edit .env — set OPENAI_API_KEY (and optionally GITHUB_TOKEN, VNC_PASSWORD)
 ```
 
-Common providers:
-
 ```bash
-# OpenRouter
+# OpenRouter example
 OPENAI_API_KEY=sk-or-v1-...
 OPENAI_BASE_URL=https://openrouter.ai/api/v1
 MODEL=openai/gpt-4o-mini
 
-# OpenAI
-OPENAI_API_KEY=sk-...
-OPENAI_BASE_URL=https://api.openai.com/v1
-MODEL=gpt-4o-mini
-
-# Local (e.g. Ollama OpenAI-compatible endpoint)
-OPENAI_API_KEY=ollama
-OPENAI_BASE_URL=http://host.docker.internal:11434/v1
-MODEL=llama3.2
+VNC_PASSWORD=choose-a-secret
+NOVNC_PUBLIC_URL=http://localhost:6080
 ```
 
-Optional:
+On a VPS, set `NOVNC_PUBLIC_URL` to `http://YOUR_IP:6080` (or your HTTPS reverse-proxy URL).
 
-```bash
-GITHUB_TOKEN=ghp_...   # for github_run / gh inside the container
-```
-
-### 3. Run with Docker Compose
+### 3. Run chat + live desktop
 
 ```bash
 docker compose up --build
 ```
 
-Open **http://localhost:8080**
+| Service | URL |
+|---|---|
+| Chat UI | http://localhost:8080 |
+| Live desktop (noVNC) | http://localhost:6080/vnc.html |
 
-Health check: `GET /health`
+Health: `GET /health` · UI config: `GET /api/config`
 
-### 4. Stop
+### 4. Watch / take over the desktop
+
+1. Open the chat UI → **Computer** tab (iframe), or open noVNC fullscreen.
+2. When prompted, enter `VNC_PASSWORD`.
+3. Ask the agent to open a site or click around — you see it live and can click/type yourself in the same session (`x11vnc -shared`).
+
+### 5. Stop
 
 ```bash
 docker compose down
 ```
+
+## Security (important)
+
+- **Do not expose port 6080 to the open internet without protection.** Prefer:
+  - firewall allowlist (e.g. `ufw allow from YOUR_IP to any port 6080`), and/or
+  - reverse proxy with TLS + basic auth / SSO in front of noVNC.
+- Set a strong `VNC_PASSWORD` (classic VNC uses up to 8 characters for the wire password).
+- Desktop-api port **7090** is **not** published to the host — only reachable on the Compose network.
+- Never commit `.env` or tokens (see `.gitignore`).
+- File tools stay confined to `WORKSPACE_DIR`; shell boundary is the container.
+
+Same-origin note: the Computer tab iframes `NOVNC_PUBLIC_URL`. If the chat UI and noVNC are on different hosts/ports, some browsers may restrict cookies/embedding — use **Open fullscreen** or put both behind one reverse proxy (e.g. nginx `/` → agent, `/desktop/` → noVNC). A full WebSocket-aware proxy is optional; documenting `:6080` is enough for most VPS setups.
+
+## When to use which browser
+
+| Goal | Use |
+|---|---|
+| User should **see** the GUI / take over | `desktop_*` tools + Computer tab |
+| Quick scrape / extract text | Playwright `browser_*` tools |
 
 ## API
 
 ### `POST /api/chat`
 
 ```json
-{
-  "messages": [
-    { "role": "user", "content": "List files in the workspace" }
-  ]
-}
+{ "messages": [ { "role": "user", "content": "Open example.com on the desktop and screenshot it" } ] }
 ```
 
-Or shorthand:
+### `GET /api/config`
 
-```json
-{ "message": "What is the title of https://example.com ?" }
-```
-
-Response:
-
-```json
-{
-  "reply": "...",
-  "tool_rounds": 1,
-  "messages": [ ]
-}
-```
+Returns `novnc_public_url` and `novnc_embed_url` for the SPA (no secrets).
 
 ## Project layout
 
 ```
 nitc-agent/
   app/
-    main.py          # FastAPI: /health, /api/chat, static UI
-    agent.py         # tool-calling agent loop
-    config.py        # env settings
-    tools/           # shell, files, browser, github + registry
-    static/index.html
-  workspace/         # sandbox (persisted via compose volume)
-  Dockerfile
+    main.py              # FastAPI: /health, /api/chat, /api/config, static UI
+    agent.py             # tool-calling loop + system prompt
+    config.py
+    tools/               # shell, files, browser, github, computer
+    static/index.html    # Chat + Computer (noVNC) tabs
+  desktop/
+    entrypoint.sh        # Xvfb, openbox, x11vnc, websockify, desktop-api
+    api/main.py          # desktop-api (screenshot/click/type/…)
+  workspace/             # shared sandbox volume
+  Dockerfile             # agent image
+  Dockerfile.desktop     # desktop + noVNC + desktop-api
   docker-compose.yml
   .env.example
 ```
 
-## Safety notes
-
-- Never commit `.env` or tokens (see `.gitignore`).
-- Paths for file tools are confined to `WORKSPACE_DIR`.
-- Shell has a best-effort blocklist for destructive host patterns; the real boundary is the container.
-- Browser is headless Chromium inside the container (`shm_size: 256mb` in compose).
-
 ## Roadmap
 
-- **Phase 1** (this repo): chat UI, agent loop, shell/files/browser/GitHub, Docker
-- **Phase 2**: streaming SSE, multi-user sessions, more connectors (Slack, Drive, …)
-- **Phase 3**: persistent memory, scheduled jobs, multi-agent workflows
+- **Phase 1**: chat UI, agent loop, shell/files/browser/GitHub, Docker
+- **Phase 2** (this): interactive desktop, noVNC, computer-use tools, Computer tab
+- **Phase 3**: streaming SSE, multi-user sessions, more connectors, persistent memory
 
 ## License
 

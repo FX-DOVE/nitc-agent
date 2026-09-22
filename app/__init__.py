@@ -1,3 +1,3 @@
-"""Nitc Agent — Phase 1 self-hosted AI agent with tools."""
+"""Nitc Agent — self-hosted AI agent with tools and interactive desktop."""
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"

@@ -1,5 +1,6 @@
+# Nitc Agent Phase 2 — chat agent + interactive desktop (noVNC)
 services:
-  nitc-agent:
+  agent:
     build: .
     container_name: nitc-agent
     ports:
@@ -10,11 +11,48 @@ services:
       - WORKSPACE_DIR=/app/workspace
       - HOST=0.0.0.0
       - PORT=8080
+      - DESKTOP_API_URL=http://desktop:7090
+      - NOVNC_PUBLIC_URL=${NOVNC_PUBLIC_URL:-http://localhost:6080}
     volumes:
-      # Persist agent sandbox across restarts
       - ./workspace:/app/workspace
-      # Optional: persist screenshots
       - ./screenshots:/app/screenshots
+    depends_on:
+      desktop:
+        condition: service_healthy
+    networks:
+      - nitc
     restart: unless-stopped
-    # Give browser enough shared memory
     shm_size: "256mb"
+
+  desktop:
+    build:
+      context: .
+      dockerfile: Dockerfile.desktop
+    container_name: nitc-desktop
+    ports:
+      # noVNC web UI (password-protected via VNC_PASSWORD)
+      - "6080:6080"
+      # desktop-api stays internal (7090) — not published
+    environment:
+      - DISPLAY=:99
+      - VNC_PASSWORD=${VNC_PASSWORD:-nitc}
+      - DESKTOP_WORKSPACE=/home/desktop/workspace
+      - SCREEN_WIDTH=${SCREEN_WIDTH:-1280}
+      - SCREEN_HEIGHT=${SCREEN_HEIGHT:-800}
+    volumes:
+      # Shared sandbox with the agent
+      - ./workspace:/home/desktop/workspace
+    networks:
+      - nitc
+    restart: unless-stopped
+    shm_size: "256mb"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:7090/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+networks:
+  nitc:
+    driver: bridge

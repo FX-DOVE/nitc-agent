@@ -27,6 +27,10 @@ class Settings(BaseSettings):
 
     workspace_dir: str = "/app/workspace"
 
+    # Phase 2 — interactive desktop
+    desktop_api_url: str = "http://desktop:7090"
+    novnc_public_url: str = "http://localhost:6080"
+
     @property
     def workspace_path(self) -> Path:
         path = Path(self.workspace_dir).resolve()

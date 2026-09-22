@@ -1,0 +1,100 @@
+# Lightweight interactive Linux desktop for Nitc Agent (Phase 2)
+# Xvfb + openbox + Chromium + x11vnc + noVNC + desktop-api
+FROM debian:bookworm-slim
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    DISPLAY=:99 \
+    HOME=/home/desktop \
+    DESKTOP_WORKSPACE=/home/desktop/workspace \
+    LANG=C.UTF-8
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    # X + window manager
+    xvfb \
+    x11-utils \
+    x11-xserver-utils \
+    openbox \
+    pcmanfm \
+    tint2 \
+    # Input / capture
+    xdotool \
+    scrot \
+    imagemagick \
+    # VNC + noVNC
+    x11vnc \
+    novnc \
+    websockify \
+    # Browser
+    chromium \
+    # Fonts / basics
+    fonts-liberation \
+    fonts-dejavu-core \
+    fonts-noto-color-emoji \
+    dbus-x11 \
+    ca-certificates \
+    curl \
+    python3 \
+    python3-pip \
+    python3-venv \
+    procps \
+    && rm -rf /var/lib/apt/lists/* \
+    && ln -sf /usr/bin/chromium /usr/local/bin/chromium-browser || true
+
+# Desktop user
+RUN useradd -m -u 1000 -s /bin/bash desktop \
+    && mkdir -p /home/desktop/workspace/screenshots /home/desktop/.vnc /opt/desktop-api \
+    && chown -R desktop:desktop /home/desktop
+
+# Desktop control API
+COPY desktop/api/requirements.txt /opt/desktop-api/requirements.txt
+RUN pip3 install --break-system-packages --no-cache-dir -r /opt/desktop-api/requirements.txt
+COPY desktop/api/main.py /opt/desktop-api/main.py
+COPY desktop/entrypoint.sh /usr/local/bin/desktop-entrypoint.sh
+RUN chmod +x /usr/local/bin/desktop-entrypoint.sh \
+    && chown -R desktop:desktop /opt/desktop-api
+
+# Openbox minimal config — show a usable desktop
+RUN mkdir -p /home/desktop/.config/openbox \
+    && printf '%s\n' \
+      '<?xml version="1.0" encoding="UTF-8"?>' \
+      '<openbox_menu xmlns="http://openbox.org/">' \
+      '  <menu id="root-menu" label="Openbox">' \
+      '    <item label="Terminal"><action name="Execute"><command>x-terminal-emulator</command></action></item>' \
+      '    <item label="Chromium"><action name="Execute"><command>chromium --no-sandbox</command></action></item>' \
+      '    <item label="File Manager"><action name="Execute"><command>pcmanfm</command></action></item>' \
+      '    <separator/>' \
+      '    <item label="Reconfigure"><action name="Reconfigure"/></item>' \
+      '  </menu>' \
+      '</openbox_menu>' \
+      > /home/desktop/.config/openbox/menu.xml \
+    && printf '%s\n' \
+      '<?xml version="1.0" encoding="UTF-8"?>' \
+      '<openbox_config xmlns="http://openbox.org/3.4/rc">' \
+      '  <theme><name>Clearlooks</name></theme>' \
+      '  <desktops><number>1</number></desktops>' \
+      '  <keyboard>' \
+      '    <keybind key="W-Return"><action name="Execute"><command>x-terminal-emulator</command></action></keybind>' \
+      '  </keyboard>' \
+      '  <mouse>' \
+      '    <context name="Root">' \
+      '      <mousebind button="Right" action="Press"><action name="ShowMenu"><menu>root-menu</menu></action></mousebind>' \
+      '    </context>' \
+      '  </mouse>' \
+      '</openbox_config>' \
+      > /home/desktop/.config/openbox/rc.xml \
+    && chown -R desktop:desktop /home/desktop/.config
+
+# Optional terminal for the DE (xterm is tiny)
+RUN apt-get update && apt-get install -y --no-install-recommends xterm \
+    && update-alternatives --set x-terminal-emulator /usr/bin/xterm || true \
+    && rm -rf /var/lib/apt/lists/*
+
+USER desktop
+WORKDIR /home/desktop
+
+EXPOSE 6080 7090
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=25s --retries=3 \
+  CMD curl -fsS http://127.0.0.1:7090/health || exit 1
+
+CMD ["/usr/local/bin/desktop-entrypoint.sh"]

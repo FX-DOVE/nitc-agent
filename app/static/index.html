@@ -26,15 +26,14 @@
       background: var(--bg); color: var(--text);
       font-family: var(--font);
     }
-    .app {
+    .shell {
       display: flex; flex-direction: column;
-      max-width: 860px; height: 100%; margin: 0 auto;
+      height: 100%; max-width: 1200px; margin: 0 auto;
       padding: 0 12px 12px;
     }
     header {
       display: flex; align-items: center; justify-content: space-between;
-      padding: 16px 4px 12px; border-bottom: 1px solid var(--border);
-      gap: 12px;
+      padding: 16px 4px 8px; gap: 12px; flex-wrap: wrap;
     }
     header h1 {
       margin: 0; font-size: 1.15rem; font-weight: 650;
@@ -47,6 +46,24 @@
     }
     #status-dot.ok { background: var(--ok); }
     #status-dot.err { background: var(--danger); }
+    .tabs {
+      display: flex; gap: 4px; border-bottom: 1px solid var(--border);
+      padding-bottom: 0;
+    }
+    .tab {
+      background: transparent; border: 1px solid transparent;
+      border-bottom: none; color: var(--muted);
+      padding: 10px 16px; border-radius: 8px 8px 0 0;
+      cursor: pointer; font: inherit; font-weight: 600;
+    }
+    .tab:hover { color: var(--text); }
+    .tab.active {
+      color: var(--text); background: var(--panel);
+      border-color: var(--border); margin-bottom: -1px;
+    }
+    .panels { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+    .panel { display: none; flex: 1; min-height: 0; flex-direction: column; }
+    .panel.active { display: flex; }
     #messages {
       flex: 1; overflow-y: auto; padding: 16px 4px;
       display: flex; flex-direction: column; gap: 12px;
@@ -83,34 +100,85 @@
       padding: 12px; font: inherit; outline: none;
     }
     #input:focus { border-color: var(--accent); }
-    #send {
+    #send, .btn {
       background: var(--accent); color: #fff; border: none;
       border-radius: 8px; padding: 0 18px; font-weight: 600;
-      cursor: pointer; font: inherit;
+      cursor: pointer; font: inherit; text-decoration: none;
+      display: inline-flex; align-items: center; justify-content: center;
+      height: 40px;
     }
-    #send:hover { background: var(--accent-hover); }
+    #send:hover, .btn:hover { background: var(--accent-hover); }
     #send:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn.secondary {
+      background: transparent; border: 1px solid var(--border); color: var(--text);
+    }
+    .btn.secondary:hover { border-color: var(--accent); color: var(--accent); }
     .tools-badge {
       font-size: 0.75rem; color: var(--muted); margin-top: 6px;
+    }
+    .desktop-toolbar {
+      display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+      padding: 10px 4px; color: var(--muted); font-size: 0.85rem;
+    }
+    .desktop-frame-wrap {
+      flex: 1; min-height: 360px; border: 1px solid var(--border);
+      border-radius: var(--radius); overflow: hidden; background: #000;
+      position: relative;
+    }
+    #novnc-frame {
+      width: 100%; height: 100%; border: 0; background: #111;
+    }
+    .desktop-hint {
+      padding: 8px 4px; color: var(--muted); font-size: 0.8rem; line-height: 1.4;
+    }
+    .desktop-hint code {
+      background: var(--panel); padding: 1px 6px; border-radius: 4px;
+      font-size: 0.75rem;
     }
   </style>
 </head>
 <body>
-  <div class="app">
+  <div class="shell">
     <header>
       <div>
         <h1>Nitc Agent</h1>
-        <div class="meta">Phase 1 · shell · files · browser · GitHub</div>
+        <div class="meta">Phase 2 · desktop · shell · files · browser · GitHub</div>
       </div>
       <div class="meta"><span id="status-dot"></span><span id="status-text">checking…</span></div>
     </header>
-    <div id="messages">
-      <div class="msg system-note">Ask me to run commands, edit files in the workspace, browse the web, or use GitHub.</div>
+
+    <div class="tabs" role="tablist">
+      <button type="button" class="tab active" data-tab="chat" role="tab" aria-selected="true">Chat</button>
+      <button type="button" class="tab" data-tab="computer" role="tab" aria-selected="false">Computer</button>
     </div>
-    <form class="composer" id="form">
-      <textarea id="input" placeholder="Message Nitc Agent…" rows="2" autofocus></textarea>
-      <button type="submit" id="send">Send</button>
-    </form>
+
+    <div class="panels">
+      <div class="panel active" id="panel-chat" role="tabpanel">
+        <div id="messages">
+          <div class="msg system-note">Ask me to drive the desktop (watch the Computer tab), run commands, edit workspace files, browse, or use GitHub.</div>
+        </div>
+        <form class="composer" id="form">
+          <textarea id="input" placeholder="Message Nitc Agent…" rows="2" autofocus></textarea>
+          <button type="submit" id="send">Send</button>
+        </form>
+      </div>
+
+      <div class="panel" id="panel-computer" role="tabpanel">
+        <div class="desktop-toolbar">
+          <span>Live desktop (noVNC)</span>
+          <a class="btn secondary" id="novnc-open" href="#" target="_blank" rel="noopener">Open fullscreen</a>
+          <button type="button" class="btn secondary" id="novnc-reload">Reload view</button>
+        </div>
+        <div class="desktop-frame-wrap">
+          <iframe id="novnc-frame" title="Nitc desktop noVNC" allow="clipboard-read; clipboard-write"></iframe>
+        </div>
+        <div class="desktop-hint">
+          Enter the <code>VNC_PASSWORD</code> when prompted. On a VPS set <code>NOVNC_PUBLIC_URL</code>
+          to your public host and firewall port <strong>6080</strong> (or put noVNC behind HTTPS + auth).
+          Same-host embeds work when the chat UI and noVNC share a reachable origin; otherwise use Open fullscreen.
+        </div>
+      </div>
+    </div>
   </div>
   <script>
     const messagesEl = document.getElementById("messages");
@@ -119,9 +187,15 @@
     const sendBtn = document.getElementById("send");
     const statusDot = document.getElementById("status-dot");
     const statusText = document.getElementById("status-text");
+    const novncFrame = document.getElementById("novnc-frame");
+    const novncOpen = document.getElementById("novnc-open");
+    const novncReload = document.getElementById("novnc-reload");
 
     /** @type {{role: string, content: string}[]} */
     let history = [];
+    let novncEmbed = "";
+    let novncPublic = "";
+    let computerLoaded = false;
 
     function appendMessage(role, content, extra) {
       const div = document.createElement("div");
@@ -143,6 +217,47 @@
       messagesEl.scrollTop = messagesEl.scrollHeight;
       return div;
     }
+
+    function setTab(name) {
+      document.querySelectorAll(".tab").forEach((t) => {
+        const on = t.dataset.tab === name;
+        t.classList.toggle("active", on);
+        t.setAttribute("aria-selected", on ? "true" : "false");
+      });
+      document.querySelectorAll(".panel").forEach((p) => {
+        p.classList.toggle("active", p.id === "panel-" + name);
+      });
+      if (name === "computer" && !computerLoaded && novncEmbed) {
+        novncFrame.src = novncEmbed;
+        computerLoaded = true;
+      }
+    }
+
+    document.querySelectorAll(".tab").forEach((t) => {
+      t.addEventListener("click", () => setTab(t.dataset.tab));
+    });
+
+    async function loadConfig() {
+      try {
+        const r = await fetch("/api/config");
+        const data = await r.json();
+        novncPublic = (data.novnc_public_url || "http://localhost:6080").replace(/\/$/, "");
+        novncEmbed = data.novnc_embed_url
+          || (novncPublic + "/vnc.html?autoconnect=1&resize=scale");
+        novncOpen.href = novncEmbed;
+      } catch (e) {
+        novncPublic = "http://localhost:6080";
+        novncEmbed = novncPublic + "/vnc.html?autoconnect=1&resize=scale";
+        novncOpen.href = novncEmbed;
+      }
+    }
+
+    novncReload.addEventListener("click", () => {
+      if (novncEmbed) {
+        novncFrame.src = novncEmbed;
+        computerLoaded = true;
+      }
+    });
 
     async function refreshHealth() {
       try {
@@ -200,6 +315,7 @@
       }
     });
 
+    loadConfig();
     refreshHealth();
     setInterval(refreshHealth, 30000);
   </script>

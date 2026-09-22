@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any, Awaitable, Callable
 
-from app.tools import browser, files, github_tool, shell
+from app.tools import browser, computer, files, github_tool, shell
 
 ToolHandler = Callable[..., Awaitable[str] | str]
 
@@ -173,6 +173,136 @@ TOOL_SPECS: list[dict[str, Any]] = [
             },
         },
     },
+
+    {
+        "type": "function",
+        "function": {
+            "name": "desktop_screenshot",
+            "description": (
+                "Capture a screenshot of the interactive Linux desktop (user-visible via noVNC). "
+                "Saves under workspace/screenshots/. Prefer this for GUI tasks over headless browser screenshots."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "filename": {
+                        "type": "string",
+                        "description": "Optional png filename under screenshots/",
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "desktop_click",
+            "description": "Click at (x, y) on the interactive desktop. Button 1=left, 2=middle, 3=right.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "x": {"type": "integer", "description": "X pixel coordinate"},
+                    "y": {"type": "integer", "description": "Y pixel coordinate"},
+                    "button": {
+                        "type": "integer",
+                        "description": "Mouse button (1 left, 2 middle, 3 right). Default 1",
+                        "default": 1,
+                    },
+                    "clicks": {
+                        "type": "integer",
+                        "description": "Click count (1 or 2 for double-click). Default 1",
+                        "default": 1,
+                    },
+                },
+                "required": ["x", "y"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "desktop_type",
+            "description": (
+                "Type text into the focused desktop window. "
+                "Optionally press a key afterwards (Return, Tab, Escape, BackSpace, …)."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "text": {"type": "string", "description": "Text to type"},
+                    "key": {
+                        "type": "string",
+                        "description": "Optional key to press after typing (e.g. Return, Tab)",
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "desktop_hotkey",
+            "description": "Press a key combination on the desktop, e.g. keys=['ctrl','c'] or ['alt','F4'].",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "keys": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Ordered keys in the combo",
+                    },
+                },
+                "required": ["keys"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "desktop_scroll",
+            "description": "Scroll at (x, y) on the desktop. direction: up/down/left/right.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "x": {"type": "integer"},
+                    "y": {"type": "integer"},
+                    "direction": {
+                        "type": "string",
+                        "enum": ["up", "down", "left", "right"],
+                        "default": "down",
+                    },
+                    "amount": {
+                        "type": "integer",
+                        "description": "Number of scroll notches (default 3)",
+                        "default": 3,
+                    },
+                },
+                "required": ["x", "y"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "desktop_open_browser",
+            "description": (
+                "Open a URL in Chromium on the interactive desktop (visible in noVNC). "
+                "Use for GUI browsing the user can watch; use browser_* for headless scrapes."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {
+                        "type": "string",
+                        "description": "Full http(s) URL",
+                    },
+                },
+                "required": ["url"],
+            },
+        },
+    },
 ]
 
 HANDLERS: dict[str, ToolHandler] = {
@@ -184,6 +314,12 @@ HANDLERS: dict[str, ToolHandler] = {
     "browser_get_text": browser.browser_get_text,
     "browser_screenshot": browser.browser_screenshot,
     "github_run": github_tool.github_run,
+    "desktop_screenshot": computer.desktop_screenshot,
+    "desktop_click": computer.desktop_click,
+    "desktop_type": computer.desktop_type,
+    "desktop_hotkey": computer.desktop_hotkey,
+    "desktop_scroll": computer.desktop_scroll,
+    "desktop_open_browser": computer.desktop_open_browser,
 }
 
 

@@ -22,7 +22,7 @@ STATIC_DIR = Path(__file__).parent / "static"
 
 app = FastAPI(
     title="Nitc Agent",
-    description="Phase 1 self-hosted AI agent with shell, files, browser, and GitHub tools.",
+    description="Self-hosted AI agent with shell, files, interactive desktop, browser, and GitHub tools.",
     version=__version__,
 )
 
@@ -55,6 +55,21 @@ async def health() -> dict[str, Any]:
         "model": settings.model,
         "workspace": str(settings.workspace_path),
         "api_key_set": bool(settings.openai_api_key),
+        "desktop_api_url": settings.desktop_api_url,
+        "novnc_public_url": settings.novnc_public_url,
+    }
+
+
+@app.get("/api/config")
+async def api_config() -> dict[str, Any]:
+    """Public UI config (no secrets)."""
+    settings = get_settings()
+    novnc = settings.novnc_public_url.rstrip("/")
+    return {
+        "version": __version__,
+        "novnc_public_url": novnc,
+        "novnc_embed_url": f"{novnc}/vnc.html?autoconnect=1&resize=scale",
+        "model": settings.model,
     }
 
 
