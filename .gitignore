@@ -1,0 +1,46 @@
+# Environment / secrets
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+credentials.json
+secrets/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+*.egg-info/
+.eggs/
+dist/
+build/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Agent runtime
+workspace/*
+!workspace/.gitkeep
+*.log
+screenshots/
+playwright-report/
+test-results/
+
+# Docker
+docker-compose.override.yml

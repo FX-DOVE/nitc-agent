@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Nitc Agent</title>
+  <style>
+    :root {
+      --bg: #0f1419;
+      --panel: #1a2332;
+      --border: #2d3a4f;
+      --text: #e7ecf3;
+      --muted: #8b9bb4;
+      --accent: #3d8bfd;
+      --accent-hover: #5ba0ff;
+      --user: #243044;
+      --assistant: #1e2a3a;
+      --danger: #f07178;
+      --ok: #7fd962;
+      --radius: 12px;
+      --font: "Segoe UI", system-ui, -apple-system, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0; height: 100%;
+      background: var(--bg); color: var(--text);
+      font-family: var(--font);
+    }
+    .app {
+      display: flex; flex-direction: column;
+      max-width: 860px; height: 100%; margin: 0 auto;
+      padding: 0 12px 12px;
+    }
+    header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 16px 4px 12px; border-bottom: 1px solid var(--border);
+      gap: 12px;
+    }
+    header h1 {
+      margin: 0; font-size: 1.15rem; font-weight: 650;
+      letter-spacing: -0.02em;
+    }
+    header .meta { color: var(--muted); font-size: 0.8rem; }
+    #status-dot {
+      display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+      background: var(--muted); margin-right: 6px; vertical-align: middle;
+    }
+    #status-dot.ok { background: var(--ok); }
+    #status-dot.err { background: var(--danger); }
+    #messages {
+      flex: 1; overflow-y: auto; padding: 16px 4px;
+      display: flex; flex-direction: column; gap: 12px;
+    }
+    .msg {
+      max-width: 92%; padding: 12px 14px; border-radius: var(--radius);
+      line-height: 1.5; white-space: pre-wrap; word-break: break-word;
+      border: 1px solid var(--border);
+    }
+    .msg.user {
+      align-self: flex-end; background: var(--user);
+      border-color: #334663;
+    }
+    .msg.assistant {
+      align-self: flex-start; background: var(--assistant);
+    }
+    .msg .role {
+      font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.06em;
+      color: var(--muted); margin-bottom: 6px;
+    }
+    .msg.system-note {
+      align-self: center; background: transparent; border-style: dashed;
+      color: var(--muted); font-size: 0.85rem; max-width: 100%;
+    }
+    .composer {
+      display: flex; gap: 8px; padding: 10px;
+      background: var(--panel); border: 1px solid var(--border);
+      border-radius: var(--radius);
+    }
+    #input {
+      flex: 1; resize: none; min-height: 48px; max-height: 160px;
+      background: var(--bg); color: var(--text);
+      border: 1px solid var(--border); border-radius: 8px;
+      padding: 12px; font: inherit; outline: none;
+    }
+    #input:focus { border-color: var(--accent); }
+    #send {
+      background: var(--accent); color: #fff; border: none;
+      border-radius: 8px; padding: 0 18px; font-weight: 600;
+      cursor: pointer; font: inherit;
+    }
+    #send:hover { background: var(--accent-hover); }
+    #send:disabled { opacity: 0.5; cursor: not-allowed; }
+    .tools-badge {
+      font-size: 0.75rem; color: var(--muted); margin-top: 6px;
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header>
+      <div>
+        <h1>Nitc Agent</h1>
+        <div class="meta">Phase 1 · shell · files · browser · GitHub</div>
+      </div>
+      <div class="meta"><span id="status-dot"></span><span id="status-text">checking…</span></div>
+    </header>
+    <div id="messages">
+      <div class="msg system-note">Ask me to run commands, edit files in the workspace, browse the web, or use GitHub.</div>
+    </div>
+    <form class="composer" id="form">
+      <textarea id="input" placeholder="Message Nitc Agent…" rows="2" autofocus></textarea>
+      <button type="submit" id="send">Send</button>
+    </form>
+  </div>
+  <script>
+    const messagesEl = document.getElementById("messages");
+    const form = document.getElementById("form");
+    const input = document.getElementById("input");
+    const sendBtn = document.getElementById("send");
+    const statusDot = document.getElementById("status-dot");
+    const statusText = document.getElementById("status-text");
+
+    /** @type {{role: string, content: string}[]} */
+    let history = [];
+
+    function appendMessage(role, content, extra) {
+      const div = document.createElement("div");
+      div.className = "msg " + role;
+      const roleEl = document.createElement("div");
+      roleEl.className = "role";
+      roleEl.textContent = role;
+      const body = document.createElement("div");
+      body.textContent = content;
+      div.appendChild(roleEl);
+      div.appendChild(body);
+      if (extra) {
+        const badge = document.createElement("div");
+        badge.className = "tools-badge";
+        badge.textContent = extra;
+        div.appendChild(badge);
+      }
+      messagesEl.appendChild(div);
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+      return div;
+    }
+
+    async function refreshHealth() {
+      try {
+        const r = await fetch("/health");
+        const data = await r.json();
+        statusDot.className = data.api_key_set ? "ok" : "err";
+        statusText.textContent = data.api_key_set
+          ? `ok · ${data.model}`
+          : "missing OPENAI_API_KEY";
+      } catch (e) {
+        statusDot.className = "err";
+        statusText.textContent = "offline";
+      }
+    }
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const text = input.value.trim();
+      if (!text) return;
+      input.value = "";
+      appendMessage("user", text);
+      history.push({ role: "user", content: text });
+      sendBtn.disabled = true;
+      const thinking = appendMessage("assistant", "Thinking…");
+      try {
+        const r = await fetch("/api/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ messages: history }),
+        });
+        const data = await r.json();
+        thinking.remove();
+        if (!r.ok) {
+          appendMessage("assistant", data.detail || JSON.stringify(data));
+        } else {
+          const extra = data.tool_rounds
+            ? `tool rounds: ${data.tool_rounds}`
+            : null;
+          appendMessage("assistant", data.reply, extra);
+          history.push({ role: "assistant", content: data.reply });
+        }
+      } catch (err) {
+        thinking.remove();
+        appendMessage("assistant", "Network error: " + err.message);
+      } finally {
+        sendBtn.disabled = false;
+        input.focus();
+      }
+    });
+
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        form.requestSubmit();
+      }
+    });
+
+    refreshHealth();
+    setInterval(refreshHealth, 30000);
+  </script>
+</body>
+</html>

@@ -1,0 +1,20 @@
+services:
+  nitc-agent:
+    build: .
+    container_name: nitc-agent
+    ports:
+      - "8080:8080"
+    env_file:
+      - .env
+    environment:
+      - WORKSPACE_DIR=/app/workspace
+      - HOST=0.0.0.0
+      - PORT=8080
+    volumes:
+      # Persist agent sandbox across restarts
+      - ./workspace:/app/workspace
+      # Optional: persist screenshots
+      - ./screenshots:/app/screenshots
+    restart: unless-stopped
+    # Give browser enough shared memory
+    shm_size: "256mb"
