@@ -7,6 +7,10 @@
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="theme-color" content="#000000" />
+  <meta name="nitc-version" content="0.2.16" />
+  <meta name="nitc-build" content="BUILDSHA" />
+  <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate" />
+  <meta http-equiv="Pragma" content="no-cache" />
   <title>Animal Nitc</title>
   <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js" crossorigin="anonymous"></script>
@@ -370,7 +374,7 @@
     }
     #desktop-compat-img {
       position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain;
-      background: #000; z-index: 1; pointer-events: none; display: none;
+      background: #000; z-index: 2; pointer-events: none; display: none;
     }
     #desktop-compat-img.show { display: block; }
     #compat-badge {
@@ -2256,7 +2260,8 @@
       const err = document.getElementById("desktop-connect-error");
       if (err) { err.textContent = ""; err.classList.add("hidden"); }
       const retry = document.getElementById("desktop-retry");
-      if (retry) retry.classList.add("hidden");
+      // Always show Retry on connecting overlay so users are never stuck
+      if (retry) retry.classList.remove("hidden");
       setGestureLayerActive(false);
     }
 
@@ -2327,9 +2332,23 @@
 
     async function loadNovncRfb() {
       if (desktopRfbModule) return desktopRfbModule;
-      const mod = await import("https://cdn.jsdelivr.net/npm/@novnc/novnc@1.5.0/lib/rfb.js");
-      desktopRfbModule = mod.default || mod.RFB || mod;
-      return desktopRfbModule;
+      // Same-origin vendored noVNC — never depend on CDN for Computer connect
+      const candidates = [
+        "/static/novnc/core/rfb.js",
+        "/static/novnc/rfb.bundle.js",
+      ];
+      let lastErr = null;
+      for (const url of candidates) {
+        try {
+          const mod = await import(url);
+          desktopRfbModule = mod.default || mod.RFB || mod;
+          if (desktopRfbModule) return desktopRfbModule;
+        } catch (e) {
+          lastErr = e;
+          console.warn("noVNC import failed", url, e);
+        }
+      }
+      throw lastErr || new Error("noVNC RFB module unavailable");
     }
 
     function disconnectDesktopRfb() {
@@ -2361,10 +2380,10 @@
     }
 
     async function refreshCompatFrame() {
-      if (!desktopCompatImg) return;
+      if (!desktopCompatImg) return false;
       const url = "/api/desktop/screenshot?t=" + Date.now();
       // decode via Image to avoid flicker on error
-      await new Promise((resolve) => {
+      return await new Promise((resolve) => {
         const probe = new Image();
         probe.onload = () => {
           desktopCompatImg.src = url;
@@ -2373,6 +2392,47 @@
         probe.onerror = () => resolve(false);
         probe.src = url;
       });
+    }
+
+    function showCompatPixels(gen, opts) {
+      opts = opts || {};
+      if (gen !== desktopConnectGen) return;
+      if (desktopViewMode === "rfb" && desktopConnected) return;
+      desktopCompatMode = true;
+      if (desktopViewMode !== "rfb") desktopViewMode = "compat";
+      computerLoaded = true;
+      // Keep RFB canvas underneath unless full fallback kills RFB
+      if (opts.hideRfb && novncScreen) novncScreen.classList.add("hidden");
+      if (desktopCompatImg) desktopCompatImg.classList.add("show");
+      if (compatBadge) {
+        if (opts.full) {
+          compatBadge.textContent = "Live view (compat mode)";
+          compatBadge.classList.add("show");
+        }
+      }
+      hideDesktopEmpty();
+    }
+
+    function startImmediateCompatPoll(gen) {
+      // Parallel with RFB: first successful screenshot clears Connecting immediately
+      stopDesktopCompatPoll();
+      const tick = async () => {
+        if (gen !== desktopConnectGen) {
+          stopDesktopCompatPoll();
+          return;
+        }
+        if (desktopViewMode === "rfb" && desktopConnected) {
+          stopDesktopCompatPoll();
+          return;
+        }
+        const ok = await refreshCompatFrame();
+        if (gen !== desktopConnectGen) return;
+        if (ok) {
+          showCompatPixels(gen, { full: false });
+        }
+      };
+      tick();
+      desktopCompatPollId = setInterval(tick, 1200);
     }
 
     function startDesktopCompatMode(gen, reason) {
@@ -2428,7 +2488,10 @@
       computerLoaded = true;
       startDesktopHealthPoll(gen);
 
-      // Prefer in-page RFB (iframe breaks on iOS Safari)
+      // Screenshot poll starts IMMEDIATELY (parallel with RFB) — never wait for CDN/WS
+      startImmediateCompatPoll(gen);
+
+      // Prefer in-page RFB (iframe breaks on iOS Safari); same-origin vendored module
       (async () => {
         try {
           const RFB = await loadNovncRfb();
@@ -2472,13 +2535,24 @@
         }
       })();
 
-      // If RFB has not connected in 8s, fall back to screenshot live view
+      // If RFB has not connected in 3s, promote to full compat mode (badge)
       setTimeout(() => {
         if (gen !== desktopConnectGen) return;
         if (desktopConnected && desktopViewMode === "rfb") return;
-        if (desktopCompatMode) return;
+        if (desktopCompatMode && compatBadge && compatBadge.classList.contains("show")) return;
+        if (desktopCompatMode) {
+          // already showing pixels — just promote badge
+          if (compatBadge) {
+            compatBadge.textContent = "Live view (compat mode)";
+            compatBadge.classList.add("show");
+          }
+          if (novncScreen) novncScreen.classList.add("hidden");
+          disconnectDesktopRfb();
+          showCompToast("Live view (compat mode)");
+          return;
+        }
         startDesktopCompatMode(gen, "rfb-timeout");
-      }, 8000);
+      }, 3000);
     }
 
     /* —— Computer chrome: gestures, trackpad, clipboard, keyboard —— */
@@ -3644,7 +3718,7 @@
     }
 
     let settings = defaultSettings();
-    let appVersion = "0.2.8";
+    let appVersion = "0.2.16";
     let botsSearchQuery = "";
     let searchOpen = false;
     let ctxBotId = null;
@@ -4490,6 +4564,22 @@
     loadBots();
     renderBotsList();
     syncBotsFromServer().then(() => renderBotsList());
+    
+    // Force cache-bust URL to current build so stale ?v=edc97b0 bookmarks get upgraded
+    (function bustStaleQuery() {
+      try {
+        const metaBuild = document.querySelector('meta[name="nitc-build"]');
+        const metaVer = document.querySelector('meta[name="nitc-version"]');
+        const ver = (metaBuild && metaBuild.content) || (metaVer && metaVer.content) || appVersion || "0.2.16";
+        const u = new URL(location.href);
+        const cur = u.searchParams.get("v");
+        if (cur !== ver) {
+          u.searchParams.set("v", ver);
+          history.replaceState(null, "", u.pathname + u.search + u.hash);
+        }
+      } catch (_) {}
+    })();
+
     loadConfig();
     refreshHealth();
     setInterval(refreshHealth, 30000);

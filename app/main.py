@@ -28,6 +28,26 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 logger = logging.getLogger("nitc.main")
 
 STATIC_DIR = Path(__file__).parent / "static"
+
+def _git_sha() -> str:
+    """Short SHA for cache-bust / deploy verification (env or .git)."""
+    import os
+    for key in ("GIT_SHA", "SOURCE_COMMIT", "NITC_GIT_SHA"):
+        val = (os.environ.get(key) or "").strip()
+        if val:
+            return val[:12]
+    try:
+        import subprocess
+        out = subprocess.check_output(
+            ["git", "rev-parse", "--short=12", "HEAD"],
+            cwd=str(Path(__file__).resolve().parents[1]),
+            stderr=subprocess.DEVNULL,
+            timeout=2,
+        )
+        return out.decode().strip() or "unknown"
+    except Exception:
+        return "unknown"
+
 _HOP_BY_HOP = {
     "connection",
     "keep-alive",
@@ -135,6 +155,7 @@ async def health() -> dict[str, Any]:
     return {
         "status": "ok",
         "version": __version__,
+        "git_sha": _git_sha(),
         "model": settings.model,
         "workspace": str(settings.workspace_path),
         "api_key_set": bool(settings.openai_api_key),
@@ -158,6 +179,7 @@ async def api_config() -> dict[str, Any]:
     direct = settings.novnc_public_url.rstrip("/")
     return {
         "version": __version__,
+        "git_sha": _git_sha(),
         "novnc_public_url": embed,
         "novnc_direct_url": f"{direct}/vnc.html?autoconnect=1&resize=scale" if direct else embed,
         "novnc_embed_url": embed,
