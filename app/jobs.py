@@ -15,6 +15,7 @@ from typing import Any
 from app.agent import chat as agent_chat
 from app.attachments import resolve_upload
 from app.config import get_settings
+from app import store as durable_store
 
 logger = logging.getLogger("nitc.jobs")
 
@@ -226,6 +227,17 @@ def _mirror_session_user(
         with _lock:
             tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
             tmp.replace(path)
+        try:
+            durable_store.append_message(
+                session_id,
+                role="user",
+                content=user_text,
+                attachments=attachments,
+                job_id=job_id,
+                created_at=data["messages"][-1].get("ts") if data.get("messages") else None,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("sqlite user mirror failed: %s", exc)
     except (OSError, json.JSONDecodeError) as exc:
         logger.warning("session mirror failed: %s", exc)
 
@@ -264,19 +276,41 @@ def _mirror_session_assistant(
         with _lock:
             tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
             tmp.replace(path)
+        try:
+            durable_store.append_message(
+                session_id,
+                role="assistant",
+                content=reply,
+                images=images,
+                job_id=job_id,
+                status=status,
+                created_at=data["messages"][-1].get("ts") if data.get("messages") else None,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("sqlite assistant mirror failed: %s", exc)
     except (OSError, json.JSONDecodeError) as exc:
         logger.warning("session mirror assistant failed: %s", exc)
 
 
 def load_session(session_id: str) -> dict[str, Any] | None:
+    # Prefer SQLite (durable); fall back to legacy JSON session files
+    try:
+        payload = durable_store.get_session_payload(session_id)
+        if payload.get("messages"):
+            return payload
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("sqlite load_session failed: %s", exc)
+        payload = None
+    else:
+        payload = payload  # may be empty messages
     path = _session_path(session_id)
     if not path.is_file():
-        return None
+        return payload
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-        return data if isinstance(data, dict) else None
+        return data if isinstance(data, dict) else payload
     except (OSError, json.JSONDecodeError):
-        return None
+        return payload
 
 
 def list_jobs(

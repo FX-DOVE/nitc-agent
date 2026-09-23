@@ -161,3 +161,18 @@ nitc-agent/
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+## Production
+
+| | |
+|---|---|
+| **URL** | `http://<host>:8080` (VPS: `http://187.124.12.195:8080`) |
+| **MODEL** | `auto/best-fast` (OpenRouter) via `.env` `MODEL=` |
+| **Workspace** | `./workspace` → bots, sessions, jobs, **`nitc.db`** (SQLite), uploads |
+| **Backup** | Copy `workspace/nitc.db` (+ `workspace/nitc.db-wal` if present) and `workspace/bots.json` |
+| **Cache bust** | Open `http://<host>:8080/?v=<git_sha>` after deploy (UI auto-rewrites `?v=`) |
+| **Recreate agent only** | `GIT_SHA=$(git rev-parse --short=12 HEAD) docker compose up -d --no-deps --force-recreate agent` |
+| **Do not** | Rebuild `desktop` image on low disk; leave VoiceForge/Caddy alone |
+
+Storage: SQLite `workspace/nitc.db` tables `bots` + `messages` (migrates from `bots.json` + `sessions/*.json` on startup). JSON mirrors remain as export/backup.
+

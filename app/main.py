@@ -30,12 +30,24 @@ logger = logging.getLogger("nitc.main")
 STATIC_DIR = Path(__file__).parent / "static"
 
 def _git_sha() -> str:
-    """Short SHA for cache-bust / deploy verification (env or .git)."""
+    """Short SHA for cache-bust / deploy verification (env, file, or .git)."""
     import os
     for key in ("GIT_SHA", "SOURCE_COMMIT", "NITC_GIT_SHA"):
         val = (os.environ.get(key) or "").strip()
         if val:
             return val[:12]
+    for candidate in (
+        Path(__file__).resolve().parents[1] / "GIT_SHA",
+        Path("/app/GIT_SHA"),
+        get_settings().workspace_path / "GIT_SHA",
+    ):
+        try:
+            if candidate.is_file():
+                val = candidate.read_text(encoding="utf-8").strip()
+                if val:
+                    return val[:12]
+        except OSError:
+            pass
     try:
         import subprocess
         out = subprocess.check_output(
@@ -74,6 +86,12 @@ async def _lifespan(_app: FastAPI):
         bots_store.bots_path().parent.mkdir(parents=True, exist_ok=True)
     except OSError:
         pass
+    try:
+        from app import store as durable_store
+        durable_store.init_db()
+        logger.info("durable sqlite store initialized")
+    except Exception:
+        logger.exception("durable store init failed")
     await jobstore.recover_queued_jobs()
     yield
 
@@ -873,6 +891,37 @@ async def api_put_bots(body: BotsPutBody) -> dict[str, Any]:
     return bots_store.public_bots_payload(saved)
 
 
+class BotMessageIn(BaseModel):
+    role: str = "user"
+    content: str = ""
+    attachments: list[Any] = Field(default_factory=list)
+    images: list[Any] = Field(default_factory=list)
+    job_id: str | None = None
+    status: str | None = None
+
+
+@app.get("/api/bots/{bot_id}/messages")
+async def api_get_bot_messages(bot_id: str, limit: int = 200) -> dict[str, Any]:
+    from app import store as durable_store
+    msgs = durable_store.list_messages(bot_id, limit=limit)
+    return {"bot_id": bot_id, "messages": msgs, "count": len(msgs), "storage": "sqlite"}
+
+
+@app.post("/api/bots/{bot_id}/messages")
+async def api_post_bot_message(bot_id: str, body: BotMessageIn) -> dict[str, Any]:
+    from app import store as durable_store
+    msg = durable_store.append_message(
+        bot_id,
+        role=body.role,
+        content=body.content,
+        attachments=body.attachments,
+        images=body.images,
+        job_id=body.job_id,
+        status=body.status,
+    )
+    return {"ok": True, "message": msg}
+
+
 # ---------------------------------------------------------------------------
 # Desktop-api reverse proxy (clipboard / mouse / type) → desktop:7090
 _DESKTOP_PROXY_ALLOW = frozenset({
@@ -896,6 +945,7 @@ async def api_desktop_live_screenshot() -> FileResponse:
         async with httpx.AsyncClient(timeout=httpx.Timeout(20.0, connect=8.0)) as client:
             resp = await client.post(upstream)
     except httpx.ConnectError as exc:
+        logger.warning("desktop screenshot connect failed: %s", exc)
         raise HTTPException(status_code=502, detail="desktop-api unreachable") from exc
     if resp.status_code >= 400:
         raise HTTPException(status_code=502, detail=f"screenshot failed: HTTP {resp.status_code}")

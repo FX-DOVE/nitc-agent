@@ -18,6 +18,9 @@ services:
     volumes:
       - ./workspace:/app/workspace
       - ./screenshots:/app/screenshots
+      # Live code mount avoids rebuilding the agent image (disk-friendly)
+      - ./app:/app/app:ro
+      - ./GIT_SHA:/app/GIT_SHA:ro
     depends_on:
       desktop:
         condition: service_healthy

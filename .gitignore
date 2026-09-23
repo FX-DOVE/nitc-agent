@@ -54,3 +54,9 @@ workspace/jobs/*
 !workspace/sessions/
 workspace/sessions/*
 !workspace/sessions/.gitkeep
+
+# SQLite durable store
+workspace/nitc.db
+workspace/nitc.db-*
+workspace/bots.json.bak*
+GIT_SHA
