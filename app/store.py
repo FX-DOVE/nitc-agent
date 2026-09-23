@@ -206,7 +206,11 @@ def _migrate_from_json(conn: sqlite3.Connection) -> None:
 
     for bot in bots:
         conn.execute(
-            "INSERT OR REPLACE INTO bots(id, data_json, updated_at, updated_ms) VALUES (?,?,?,?)",
+            """INSERT INTO bots(id, data_json, updated_at, updated_ms) VALUES (?,?,?,?)
+                       ON CONFLICT(id) DO UPDATE SET
+                         data_json = excluded.data_json,
+                         updated_at = excluded.updated_at,
+                         updated_ms = excluded.updated_ms""",
             (
                 bot["id"],
                 json.dumps(bot, ensure_ascii=False),
@@ -318,8 +322,13 @@ def save_bots(bots: list[Any]) -> list[dict[str, Any]]:
             new_ids = {b["id"] for b in cleaned}
             # upsert
             for bot in cleaned:
+                # UPSERT without REPLACE — REPLACE deletes the row and CASCADE-wipes messages
                 conn.execute(
-                    "INSERT OR REPLACE INTO bots(id, data_json, updated_at, updated_ms) VALUES (?,?,?,?)",
+                    """INSERT INTO bots(id, data_json, updated_at, updated_ms) VALUES (?,?,?,?)
+                       ON CONFLICT(id) DO UPDATE SET
+                         data_json = excluded.data_json,
+                         updated_at = excluded.updated_at,
+                         updated_ms = excluded.updated_ms""",
                     (
                         bot["id"],
                         json.dumps(bot, ensure_ascii=False),
