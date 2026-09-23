@@ -360,10 +360,27 @@
     .desktop-zoom-wrap {
       position: absolute; inset: 0; transform-origin: 0 0; will-change: transform;
     }
-    #novnc-frame {
+    #novnc-screen, #novnc-frame {
       position: absolute; inset: 0; width: 100%; height: 100%; border: 0; background: #000; z-index: 1;
       pointer-events: none; /* gestures handled by overlay */
+      overflow: hidden;
     }
+    #novnc-screen > canvas, #novnc-screen > div {
+      width: 100% !important; height: 100% !important;
+    }
+    #desktop-compat-img {
+      position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain;
+      background: #000; z-index: 1; pointer-events: none; display: none;
+    }
+    #desktop-compat-img.show { display: block; }
+    #compat-badge {
+      position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
+      z-index: 6; padding: 6px 12px; border-radius: 999px;
+      background: rgba(0,0,0,0.65); color: #e5e7eb; font-size: 0.75rem; font-weight: 600;
+      letter-spacing: 0.02em; pointer-events: none; display: none;
+    }
+    #compat-badge.show { display: block; }
+    #novnc-screen.hidden, #novnc-frame.hidden { display: none !important; }
     .gesture-layer {
       position: absolute; inset: 0; z-index: 3; touch-action: none;
       background: transparent; -webkit-user-select: none; user-select: none;
@@ -973,7 +990,10 @@
 
         <div class="desktop-stage" id="desktop-stage">
           <div class="desktop-zoom-wrap" id="desktop-zoom-wrap">
-            <iframe id="novnc-frame" title="Animal Nitc desktop noVNC" allow="clipboard-read; clipboard-write"></iframe>
+            <div id="novnc-screen" class="novnc-screen" role="img" aria-label="Desktop live view"></div>
+            <iframe id="novnc-frame" class="hidden" title="Animal Nitc desktop noVNC (legacy)" allow="clipboard-read; clipboard-write"></iframe>
+            <img id="desktop-compat-img" alt="Desktop live view" decoding="async"/>
+            <div id="compat-badge" aria-live="polite">Live view (compat mode)</div>
             <div class="gesture-layer" id="gesture-layer" aria-hidden="true"></div>
             <svg class="trackpad-pointer hidden" id="trackpad-pointer" viewBox="0 0 24 24" aria-hidden="true">
               <path fill="#fff" stroke="#111" stroke-width="1.2" d="M5 3l12 8.2-5.4 1.3 3.4 7.2-2.6 1.2-3.5-7.3L5 17.5V3z"/>
@@ -1155,6 +1175,9 @@
     const statusDot = document.getElementById("status-dot");
     const statusText = document.getElementById("status-text");
     const novncFrame = document.getElementById("novnc-frame");
+    const novncScreen = document.getElementById("novnc-screen");
+    const desktopCompatImg = document.getElementById("desktop-compat-img");
+    const compatBadge = document.getElementById("compat-badge");
     const novncOpen = document.getElementById("novnc-open");
     const novncReload = document.getElementById("novnc-reload");
     const desktopEmpty = document.getElementById("desktop-empty");
@@ -1187,6 +1210,11 @@
     let desktopHealthPollId = null;
     let desktopHealthOk = false;
     let desktopConnectGen = 0;
+    let desktopCompatMode = false;
+    let desktopCompatPollId = null;
+    let desktopRfb = null;
+    let desktopRfbModule = null;
+    let desktopViewMode = "none"; // none | rfb | compat | iframe
     let sending = false;
     let modalMode = "bot"; // bot | group
     let screenW = 1280;
@@ -1258,6 +1286,64 @@
       ];
     }
 
+    function botUpdatedAtMs(b) {
+      if (!b) return 0;
+      const v = b.updatedAt != null ? b.updatedAt : b.updated_at;
+      if (typeof v === "number") return v;
+      if (typeof v === "string") {
+        const n = Date.parse(v);
+        return Number.isFinite(n) ? n : 0;
+      }
+      return 0;
+    }
+
+    function botsForServer(list) {
+      return (list || []).map((b) => ({
+        id: b.id,
+        name: b.name,
+        color: b.color,
+        shape: b.shape,
+        kind: b.kind || "bot",
+        pinned: !!b.pinned,
+        pinnedAt: b.pinnedAt || null,
+        unread: !!b.unread,
+        section: b.section || "",
+        hidden: !!b.hidden,
+        systemPrompt: b.systemPrompt || b.instructions || "",
+        instructions: b.instructions || b.systemPrompt || "",
+        snippet: b.snippet || b.last_snippet || "",
+        last_snippet: b.snippet || b.last_snippet || "",
+        updatedAt: botUpdatedAtMs(b) || Date.now(),
+        activeJobId: b.activeJobId || null,
+        activeJobIds: Array.isArray(b.activeJobIds) ? b.activeJobIds : [],
+        pendingJobId: b.pendingJobId || null,
+        lastJobId: b.lastJobId || null,
+      }));
+    }
+
+    function mergeBotLists(localList, serverList) {
+      const map = new Map();
+      (localList || []).forEach((b) => {
+        if (b && b.id) map.set(b.id, Object.assign({}, b));
+      });
+      (serverList || []).forEach((s) => {
+        if (!s || !s.id) return;
+        const cur = map.get(s.id);
+        if (!cur) {
+          map.set(s.id, Object.assign({ messages: [] }, s));
+          return;
+        }
+        // Server wins when newer (or equal) — durable across Safari wipe
+        if (botUpdatedAtMs(s) >= botUpdatedAtMs(cur)) {
+          map.set(s.id, Object.assign({}, cur, s, {
+            messages: Array.isArray(cur.messages) ? cur.messages : [],
+            snippet: s.snippet || s.last_snippet || cur.snippet || "",
+          }));
+        }
+      });
+      return Array.from(map.values());
+    }
+
     function loadBots() {
       try {
         const raw = localStorage.getItem(STORAGE_KEY);
@@ -1273,9 +1359,41 @@
       saveBots();
     }
 
+    let _botsPutTimer = null;
     function saveBots() {
       try {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(bots));
+      } catch (_) {}
+      // Debounced server mirror so refresh / Safari private mode keep the list
+      try {
+        if (_botsPutTimer) clearTimeout(_botsPutTimer);
+        _botsPutTimer = setTimeout(() => {
+          fetch("/api/bots", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ bots: botsForServer(bots) }),
+          }).catch(() => {});
+        }, 350);
+      } catch (_) {}
+    }
+
+    async function syncBotsFromServer() {
+      try {
+        const r = await fetch("/api/bots", { cache: "no-store" });
+        if (!r.ok) return;
+        const data = await r.json();
+        const serverBots = (data && data.bots) || [];
+        if (!serverBots.length && bots.length) {
+          // Seed server from local
+          saveBots();
+          return;
+        }
+        bots = mergeBotLists(bots, serverBots);
+        if (!bots.length) bots = defaultBots();
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(bots));
+        } catch (_) {}
+        renderBotsList();
       } catch (_) {}
     }
 
@@ -1425,7 +1543,41 @@
       renderMessagesFromHistory();
       setView("chat");
       input.focus();
-      // Reconnect to any in-flight or just-finished server job for this bot
+      // Hydrate durable session messages, then reconnect in-flight jobs
+      hydrateSessionThenResume(bot.id);
+    }
+
+    async function hydrateSessionThenResume(botId) {
+      try {
+        const r = await fetch("/api/sessions/" + encodeURIComponent(botId), { cache: "no-store" });
+        if (r.ok) {
+          const data = await r.json();
+          const msgs = Array.isArray(data.messages) ? data.messages : [];
+          if (msgs.length) {
+            // Prefer server transcript when it has more (or any) turns
+            const mapped = msgs.map((m) => ({
+              role: m.role,
+              content: m.content || "",
+              images: m.images || [],
+              attachments: m.attachments || [],
+              job_id: m.job_id || null,
+              failed: m.status === "failed",
+            })).filter((m) => m.role === "user" || m.role === "assistant");
+            if (mapped.length >= history.length) {
+              history = mapped;
+              const bot = bots.find((b) => b.id === botId);
+              if (bot) {
+                bot.messages = history.slice();
+                const last = [...history].reverse().find((m) => m.content);
+                if (last) bot.snippet = String(last.content || "").replace(/\s+/g, " ").slice(0, 80);
+                bot.updatedAt = Date.now();
+                saveBots();
+              }
+              renderMessagesFromHistory();
+            }
+          }
+        }
+      } catch (_) {}
       resumeActiveJobsForBot();
     }
 
@@ -1448,6 +1600,141 @@
 
     function sleep(ms) {
       return new Promise((r) => setTimeout(r, ms));
+    }
+
+    function updateStreamingBubble(row, text) {
+      if (!row) return;
+      const bubble = row.querySelector(".bubble");
+      if (!bubble) return;
+      const raw = String(text == null ? "" : text).trim();
+      bubble.style.display = "";
+      bubble.classList.add("md-body", "streaming");
+      bubble.dataset.thinking = "1";
+      if (!raw) {
+        bubble.textContent = "…";
+        return;
+      }
+      try {
+        bubble.innerHTML = renderAssistantMarkdown(raw);
+      } catch (_) {
+        bubble.textContent = raw;
+      }
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+    }
+
+    function finalizeStreamingBubble(row, text, images) {
+      if (!row) return;
+      const bubble = row.querySelector(".bubble");
+      if (!bubble) return;
+      delete bubble.dataset.thinking;
+      bubble.classList.remove("streaming");
+      bubble.style.display = "";
+      bubble.classList.add("md-body");
+      const content = String(text || "");
+      const display = Array.isArray(images) && images.length ? stripMarkdownImages(content) : content;
+      try {
+        bubble.innerHTML = renderAssistantMarkdown(display);
+      } catch (_) {
+        bubble.textContent = display;
+      }
+      if (Array.isArray(images) && images.length) {
+        let wrap = bubble.querySelector(".bubble-images");
+        if (!wrap) {
+          wrap = document.createElement("div");
+          wrap.className = "bubble-images";
+          bubble.appendChild(wrap);
+        }
+        wrap.innerHTML = "";
+        images.forEach((src) => {
+          if (!src) return;
+          const img = document.createElement("img");
+          img.src = src;
+          img.alt = "screenshot";
+          img.loading = "lazy";
+          wrap.appendChild(img);
+        });
+      }
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+    }
+
+    /**
+     * Live job updates: prefer EventSource on /api/jobs/{id}/events;
+     * fall back to solid 500ms polling (better on mobile Safari over HTTP).
+     * Marker: pollJobPartial
+     */
+    function pollJobPartial(jobId, opts) {
+      const onUpdate = (opts && opts.onUpdate) || null;
+      const maxMs = (opts && opts.maxMs) || 30 * 60 * 1000;
+      const start = Date.now();
+      activeJobPolls[jobId] = true;
+      const terminal = (st) => st === "completed" || st === "failed" || st === "cancelled";
+      const done = (job, es) => {
+        try { if (es) es.close(); } catch (_) {}
+        delete activeJobPolls[jobId];
+        return job;
+      };
+
+      const pollLoop = async () => {
+        let delay = 500;
+        while (Date.now() - start < maxMs) {
+          let job = null;
+          try {
+            job = await fetchJob(jobId);
+          } catch (err) {
+            if (onUpdate) onUpdate({ status: "running", transient_error: String(err.message || err) });
+            await sleep(delay);
+            delay = Math.min(delay * 1.3, 2500);
+            continue;
+          }
+          if (!job) throw new Error("Job not found on server");
+          if (onUpdate) onUpdate(job);
+          try { maybeRenderApprovalFromJob(job); } catch (_) {}
+          if (terminal(job.status)) return done(job, null);
+          await sleep(500);
+          delay = 500;
+        }
+        const last = await fetchJob(jobId).catch(() => null);
+        if (last && terminal(last.status)) return done(last, null);
+        throw new Error("Still working on the server — reopen this chat to see the result.");
+      };
+
+      if (typeof EventSource !== "undefined") {
+        return new Promise((resolve, reject) => {
+          let settled = false;
+          let es = null;
+          const failToPoll = () => {
+            if (settled) return;
+            settled = true;
+            try { if (es) es.close(); } catch (_) {}
+            pollLoop().then(resolve, reject);
+          };
+          try {
+            es = new EventSource("/api/jobs/" + encodeURIComponent(jobId) + "/events");
+          } catch (_) {
+            return failToPoll();
+          }
+          const onJob = (ev) => {
+            try {
+              const job = JSON.parse(ev.data);
+              if (onUpdate) onUpdate(job);
+              try { maybeRenderApprovalFromJob(job); } catch (_) {}
+              if (terminal(job.status)) {
+                if (settled) return;
+                settled = true;
+                resolve(done(job, es));
+              }
+            } catch (_) {}
+          };
+          es.addEventListener("job", onJob);
+          es.onmessage = onJob;
+          es.onerror = () => failToPoll();
+          // Safety: if SSE never delivers, still poll
+          setTimeout(() => {
+            if (!settled) failToPoll();
+          }, 4000);
+        });
+      }
+      return pollLoop();
     }
 
     async function fetchJob(jobId) {
@@ -1501,42 +1788,8 @@
      * Returns final job object or throws only on hard failures.
      */
     async function waitForJob(jobId, opts) {
-      const onUpdate = (opts && opts.onUpdate) || null;
-      const maxMs = (opts && opts.maxMs) || 30 * 60 * 1000;
-      const start = Date.now();
-      let delay = 600;
-      activeJobPolls[jobId] = true;
-      try {
-        while (Date.now() - start < maxMs) {
-          let job = null;
-          try {
-            job = await fetchJob(jobId);
-          } catch (err) {
-            // Transient network blip — keep polling; do NOT surface Load failed
-            if (onUpdate) onUpdate({ status: "running", transient_error: String(err.message || err) });
-            await sleep(delay);
-            delay = Math.min(delay * 1.4, 4000);
-            continue;
-          }
-          if (!job) {
-            throw new Error("Job not found on server");
-          }
-          if (onUpdate) onUpdate(job);
-          try { maybeRenderApprovalFromJob(job); } catch (_) {}
-          if (job.status === "completed" || job.status === "failed" || job.status === "cancelled") {
-            return job;
-          }
-          // awaiting_approval / queued / running — keep polling; Approve resumes same job
-          await sleep(delay);
-          delay = Math.min(delay + 200, 2500);
-        }
-        // Timed out waiting on client — job may still be running server-side
-        const last = await fetchJob(jobId).catch(() => null);
-        if (last && (last.status === "completed" || last.status === "failed")) return last;
-        throw new Error("Still working on the server — reopen this chat to see the result.");
-      } finally {
-        delete activeJobPolls[jobId];
-      }
+      // Live streaming via EventSource or pollJobPartial (~500ms)
+      return pollJobPartial(jobId, opts);
     }
 
     function rememberBotJob(jobId, status) {
@@ -1596,6 +1849,7 @@
       jobStatusCache[jobId] = created.status || "queued";
       rememberBotJob(jobId, "queued");
       refreshWorkingStatus();
+      updateStreamingBubble(thinkingEl, "…");
 
       const job = await waitForJob(jobId, {
         onUpdate: (j) => {
@@ -1604,31 +1858,45 @@
             rememberBotJob(jobId, j.status);
             refreshWorkingStatus();
           }
+          const partial = (j && (j.partial_reply || j.reply)) || "";
+          if (partial) updateStreamingBubble(thinkingEl, partial);
+          else if (j && j.status === "queued") updateStreamingBubble(thinkingEl, "Queued…");
           try { maybeRenderApprovalFromJob(j); } catch (_) {}
         },
       });
 
-      if (thinkingEl && thinkingEl.parentNode) thinkingEl.remove();
       delete jobStatusCache[jobId];
       rememberBotJob(jobId, job.status || "completed");
       refreshWorkingStatus();
 
       // Only append if this chat is still the same bot session
       const already = history.some((m) => m.job_id === jobId && m.role === "assistant");
-      if (already) return job;
+      if (already) {
+        if (thinkingEl && thinkingEl.parentNode) thinkingEl.remove();
+        return job;
+      }
 
       if (job.status === "failed") {
         const err = job.error || job.reply || "Job failed";
-        appendMessage("assistant", String(err));
+        finalizeStreamingBubble(thinkingEl, String(err), null);
         history.push({ role: "assistant", content: String(err), job_id: jobId, failed: true });
         persistActiveChat();
         return job;
       }
 
-      const reply = job.reply || "";
+      const reply = job.reply || job.partial_reply || "";
       const images = Array.isArray(job.images) ? job.images : [];
       const extra = job.tool_rounds ? "tool rounds: " + job.tool_rounds : null;
-      appendMessage("assistant", reply, extra, images);
+      finalizeStreamingBubble(thinkingEl, reply, images);
+      if (extra && thinkingEl) {
+        const bubble = thinkingEl.querySelector(".bubble");
+        if (bubble && !bubble.querySelector(".tools-badge")) {
+          const badge = document.createElement("div");
+          badge.className = "tools-badge";
+          badge.textContent = extra;
+          bubble.appendChild(badge);
+        }
+      }
       history.push({ role: "assistant", content: reply, images, job_id: jobId });
       persistActiveChat();
       return job;
@@ -1640,6 +1908,7 @@
       rememberBotJob(jobId, "running");
       refreshWorkingStatus();
       try {
+        updateStreamingBubble(thinkingEl, "…");
         const done = await waitForJob(jobId, {
           onUpdate: (j) => {
             if (j && j.status) {
@@ -1647,23 +1916,27 @@
               rememberBotJob(jobId, j.status);
               refreshWorkingStatus();
             }
+            const partial = (j && (j.partial_reply || j.reply)) || "";
+            if (partial) updateStreamingBubble(thinkingEl, partial);
             try { maybeRenderApprovalFromJob(j); } catch (_) {}
           },
         });
-        if (thinkingEl && thinkingEl.parentNode) thinkingEl.remove();
         delete jobStatusCache[jobId];
         rememberBotJob(jobId, done.status || "completed");
         refreshWorkingStatus();
         const already = history.some((m) => m.job_id === jobId && m.role === "assistant");
-        if (already) return;
+        if (already) {
+          if (thinkingEl && thinkingEl.parentNode) thinkingEl.remove();
+          return;
+        }
         if (done.status === "failed") {
           const err = done.error || done.reply || "Job failed";
-          appendMessage("assistant", String(err));
+          finalizeStreamingBubble(thinkingEl, String(err), null);
           history.push({ role: "assistant", content: String(err), job_id: jobId, failed: true });
         } else {
-          const reply = done.reply || "";
+          const reply = done.reply || done.partial_reply || "";
           const images = Array.isArray(done.images) ? done.images : [];
-          appendMessage("assistant", reply, null, images);
+          finalizeStreamingBubble(thinkingEl, reply, images);
           history.push({ role: "assistant", content: reply, images, job_id: jobId });
           maybeShowApprovalsFromText(reply);
           try {
@@ -1886,8 +2159,10 @@
       const bubble = document.createElement("div");
       bubble.className = "bubble";
       if (content === "__thinking__") {
-        bubble.style.display = "none";
+        bubble.classList.add("md-body", "streaming");
         bubble.dataset.thinking = "1";
+        bubble.dataset.jobStream = "1";
+        bubble.textContent = "…";
       } else if (role === "assistant") {
         bubble.classList.add("md-body");
         const display = Array.isArray(images) && images.length ? stripMarkdownImages(content) : content;
@@ -2032,15 +2307,12 @@
             screenW = data.screen.width;
             screenH = data.screen.height;
           }
-          // Auto-hide once healthy if iframe already loaded, or retry connect once
-          if (!novncFrame.src || novncFrame.src === "about:blank") {
-            connectDesktop({ reason: "health-poll", force: true });
-          } else if (computerLoaded) {
-            hideDesktopEmpty();
+          // Healthy backend alone does NOT hide overlay (need RFB or compat pixels)
+          if (!desktopConnected && !desktopCompatMode) {
+            // keep trying RFB; compat timer handles fallback
           }
         } catch (e) {
           desktopHealthOk = false;
-          // keep spinning while polling; surface Retry after sustained failure
           if (!desktopEmpty.classList.contains("is-error")) {
             showDesktopConnectError((e && e.message) ? e.message : "Desktop offline");
           }
@@ -2048,10 +2320,95 @@
       }, 3000);
     }
 
+    function desktopWsUrl() {
+      const proto = location.protocol === "https:" ? "wss:" : "ws:";
+      return proto + "//" + location.host + "/novnc/websockify";
+    }
+
+    async function loadNovncRfb() {
+      if (desktopRfbModule) return desktopRfbModule;
+      const mod = await import("https://cdn.jsdelivr.net/npm/@novnc/novnc@1.5.0/lib/rfb.js");
+      desktopRfbModule = mod.default || mod.RFB || mod;
+      return desktopRfbModule;
+    }
+
+    function disconnectDesktopRfb() {
+      if (desktopRfb) {
+        try { desktopRfb.removeEventListener("connect", desktopRfb._onConnect); } catch (_) {}
+        try { desktopRfb.removeEventListener("disconnect", desktopRfb._onDisconnect); } catch (_) {}
+        try { desktopRfb.disconnect(); } catch (_) {}
+        desktopRfb = null;
+      }
+      if (novncScreen) novncScreen.innerHTML = "";
+    }
+
+    function stopDesktopCompatPoll() {
+      if (desktopCompatPollId) {
+        clearInterval(desktopCompatPollId);
+        desktopCompatPollId = null;
+      }
+    }
+
+    function hideDesktopCompat() {
+      stopDesktopCompatPoll();
+      desktopCompatMode = false;
+      if (desktopCompatImg) {
+        desktopCompatImg.classList.remove("show");
+        desktopCompatImg.removeAttribute("src");
+      }
+      if (compatBadge) compatBadge.classList.remove("show");
+      if (novncScreen) novncScreen.classList.remove("hidden");
+    }
+
+    async function refreshCompatFrame() {
+      if (!desktopCompatImg) return;
+      const url = "/api/desktop/screenshot?t=" + Date.now();
+      // decode via Image to avoid flicker on error
+      await new Promise((resolve) => {
+        const probe = new Image();
+        probe.onload = () => {
+          desktopCompatImg.src = url;
+          resolve(true);
+        };
+        probe.onerror = () => resolve(false);
+        probe.src = url;
+      });
+    }
+
+    function startDesktopCompatMode(gen, reason) {
+      if (gen !== desktopConnectGen) return;
+      disconnectDesktopRfb();
+      if (novncFrame) {
+        try { novncFrame.src = "about:blank"; } catch (_) {}
+        novncFrame.classList.add("hidden");
+      }
+      desktopCompatMode = true;
+      desktopViewMode = "compat";
+      computerLoaded = true;
+      if (novncScreen) novncScreen.classList.add("hidden");
+      if (desktopCompatImg) desktopCompatImg.classList.add("show");
+      if (compatBadge) {
+        compatBadge.textContent = "Live view (compat mode)";
+        compatBadge.classList.add("show");
+      }
+      hideDesktopEmpty();
+      showCompToast("Live view (compat mode)");
+      stopDesktopCompatPoll();
+      refreshCompatFrame();
+      desktopCompatPollId = setInterval(() => {
+        if (gen !== desktopConnectGen || !desktopCompatMode) {
+          stopDesktopCompatPoll();
+          return;
+        }
+        refreshCompatFrame();
+      }, 1200);
+      startDesktopHealthPoll(gen);
+    }
+
     function connectDesktop(opts) {
       opts = opts || {};
-      // Queue until /api/config resolves novncEmbed — do not silently no-op
-      if (!novncEmbed) {
+      // Queue until /api/config resolves — do not silently no-op
+      if (!novncEmbed && opts.reason !== "compat-only") {
         desktopConnectPending = true;
         showDesktopConnecting("Connecting...");
         return;
@@ -2059,40 +2416,69 @@
       desktopConnectPending = false;
       const gen = ++desktopConnectGen;
       desktopConnected = false;
+      desktopViewMode = "none";
+      hideDesktopCompat();
+      disconnectDesktopRfb();
+      if (novncFrame) {
+        try { novncFrame.src = "about:blank"; } catch (_) {}
+        novncFrame.classList.add("hidden");
+      }
       showDesktopConnecting();
-      const sep = novncEmbed.includes("?") ? "&" : "?";
-      const url = novncEmbed.replace(/([?&])v=\d+/g, "").replace(/[?&]$/, "") + sep + "v=" + Date.now();
-      novncFrame.src = url;
-      computerLoaded = true;
       setGestureLayerActive(false);
-
-      const onLoad = () => {
-        if (gen !== desktopConnectGen) return;
-        // Prefer health-confirmed hide; still hide on iframe load so UI never sticks
-        hideDesktopEmpty();
-      };
-      novncFrame.addEventListener("load", onLoad, { once: true });
-
-      // Hide after 2s if health is OK (iframe load can be flaky on mobile)
-      setTimeout(async () => {
-        if (gen !== desktopConnectGen) return;
-        if (!desktopEmpty || desktopEmpty.classList.contains("hidden")) return;
-        try {
-          const data = await desktopFetch("health");
-          desktopHealthOk = true;
-          if (data.screen && data.screen.width) {
-            screenW = data.screen.width;
-            screenH = data.screen.height;
-          }
-          hideDesktopEmpty();
-        } catch (e) {
-          desktopHealthOk = false;
-          showDesktopConnectError((e && e.message) ? e.message : "Desktop health failed");
-          startDesktopHealthPoll(gen);
-        }
-      }, 2000);
-
+      computerLoaded = true;
       startDesktopHealthPoll(gen);
+
+      // Prefer in-page RFB (iframe breaks on iOS Safari)
+      (async () => {
+        try {
+          const RFB = await loadNovncRfb();
+          if (gen !== desktopConnectGen) return;
+          if (novncScreen) novncScreen.classList.remove("hidden");
+          const rfb = new RFB(novncScreen, desktopWsUrl(), {
+            wsProtocols: ["binary"],
+          });
+          rfb.scaleViewport = true;
+          rfb.resizeSession = false;
+          rfb.clipViewport = true;
+          rfb.focusOnClick = false;
+          rfb.viewOnly = true; // input via gesture-layer → desktop-api
+          rfb.background = "#000";
+          const onConnect = () => {
+            if (gen !== desktopConnectGen) return;
+            desktopViewMode = "rfb";
+            desktopConnected = true;
+            hideDesktopCompat();
+            hideDesktopEmpty();
+            showCompToast("Desktop connected");
+          };
+          const onDisconnect = (ev) => {
+            if (gen !== desktopConnectGen) return;
+            const clean = ev && ev.detail && ev.detail.clean;
+            if (!desktopCompatMode && !clean && desktopViewMode === "rfb") {
+              showDesktopConnectError("VNC disconnected");
+              startDesktopCompatMode(gen, "rfb-disconnect");
+            }
+          };
+          rfb._onConnect = onConnect;
+          rfb._onDisconnect = onDisconnect;
+          rfb.addEventListener("connect", onConnect);
+          rfb.addEventListener("disconnect", onDisconnect);
+          desktopRfb = rfb;
+        } catch (e) {
+          console.warn("RFB init failed", e);
+          if (gen === desktopConnectGen) {
+            startDesktopCompatMode(gen, "rfb-init-fail");
+          }
+        }
+      })();
+
+      // If RFB has not connected in 8s, fall back to screenshot live view
+      setTimeout(() => {
+        if (gen !== desktopConnectGen) return;
+        if (desktopConnected && desktopViewMode === "rfb") return;
+        if (desktopCompatMode) return;
+        startDesktopCompatMode(gen, "rfb-timeout");
+      }, 8000);
     }
 
     /* —— Computer chrome: gestures, trackpad, clipboard, keyboard —— */
@@ -4103,6 +4489,7 @@
     initAuthUI();
     loadBots();
     renderBotsList();
+    syncBotsFromServer().then(() => renderBotsList());
     loadConfig();
     refreshHealth();
     setInterval(refreshHealth, 30000);

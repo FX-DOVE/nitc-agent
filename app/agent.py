@@ -308,6 +308,49 @@ def _flatten_messages_for_text_only(messages: list[dict[str, Any]]) -> list[dict
     return out
 
 
+
+_TOOL_STATUS = {
+    "shell": "Using shell…",
+    "run_shell": "Using shell…",
+    "write_file": "Writing file…",
+    "read_file": "Reading file…",
+    "list_dir": "Listing directory…",
+    "browser": "Using browser…",
+    "browser_navigate": "Opening page…",
+    "browser_click": "Clicking in browser…",
+    "browser_type": "Typing in browser…",
+    "desktop_screenshot": "Capturing desktop…",
+    "desktop_click": "Clicking on desktop…",
+    "desktop_type": "Typing on desktop…",
+    "computer": "Using computer…",
+    "github": "Using GitHub…",
+    "zip_paths": "Zipping files…",
+}
+
+
+def _tool_status_message(name: str) -> str:
+    n = (name or "").strip()
+    if n in _TOOL_STATUS:
+        return _TOOL_STATUS[n]
+    if n.startswith("browser"):
+        return "Using browser…"
+    if n.startswith("desktop") or n.startswith("computer"):
+        return "Using computer…"
+    if n.startswith("github"):
+        return "Using GitHub…"
+    nice = n.replace("_", " ").strip() or "tool"
+    return f"Using {nice}…"
+
+
+def _emit(on_event: Any, payload: dict[str, Any]) -> None:
+    if not on_event:
+        return
+    try:
+        on_event(payload)
+    except Exception:
+        pass
+
+
 async def chat(
     messages: list[dict[str, Any]],
     attachments: list[dict[str, Any]] | None = None,
@@ -397,6 +440,14 @@ async def chat(
 
     async with httpx.AsyncClient(timeout=120.0) as client:
         while tool_rounds < settings.max_tool_rounds:
+            _emit(
+                on_event,
+                {
+                    "type": "status",
+                    "message": "Thinking…" if tool_rounds == 0 else f"Planning next step (round {tool_rounds})…",
+                    "partial_reply": "Thinking…" if tool_rounds == 0 else f"Working… (round {tool_rounds})",
+                },
+            )
             payload: dict[str, Any] = {
                 "model": settings.model,
                 "messages": working,
@@ -487,6 +538,14 @@ async def chat(
                 _extract_job_state_from_reply(reply)
                 reply = _strip_job_state_fence(reply)
                 _heuristic_save_job_on_user_wait(reply, last_user)
+                _emit(
+                    on_event,
+                    {
+                        "type": "partial",
+                        "partial_reply": reply,
+                        "message": "Finalizing…",
+                    },
+                )
                 return {
                     "reply": reply,
                     "messages": [m for m in working if m.get("role") != "system"],
@@ -496,12 +555,37 @@ async def chat(
                 }
 
             tool_rounds += 1
+            assistant_text = (msg.get("content") or "").strip()
+            if assistant_text:
+                _emit(
+                    on_event,
+                    {
+                        "type": "partial",
+                        "partial_reply": assistant_text,
+                        "message": assistant_text[:200],
+                    },
+                )
             for tc in tool_calls:
                 fn = tc.get("function") or {}
                 name = fn.get("name") or ""
                 raw_args = fn.get("arguments") or "{}"
                 tc_id = tc.get("id") or f"call_{tool_rounds}"
                 logger.info("tool_call name=%s args=%s", name, raw_args[:200])
+                status_msg = _tool_status_message(name)
+                preview = assistant_text or status_msg
+                if assistant_text and status_msg:
+                    preview = f"{assistant_text}\n\n_{status_msg}_"
+                elif status_msg:
+                    preview = status_msg
+                _emit(
+                    on_event,
+                    {
+                        "type": "tool_start",
+                        "tool": name,
+                        "message": status_msg,
+                        "partial_reply": preview,
+                    },
+                )
                 result = await run_tool(name, raw_args)
                 for img in _image_urls_from_tool_result(name, result):
                     if img not in collected_images:
@@ -509,11 +593,20 @@ async def chat(
                 for dl in _download_urls_from_tool_result(name, result):
                     if dl not in collected_downloads:
                         collected_downloads.append(dl)
-                if on_event and name:
-                    try:
-                        on_event({"type": "tool_result", "tool": name, "ok": True})
-                    except Exception:
-                        pass
+                done_msg = f"Finished {name.replace('_', ' ') or 'tool'}…"
+                done_preview = assistant_text or done_msg
+                if assistant_text:
+                    done_preview = f"{assistant_text}\n\n_{done_msg}_"
+                _emit(
+                    on_event,
+                    {
+                        "type": "tool_result",
+                        "tool": name,
+                        "ok": True,
+                        "message": done_msg,
+                        "partial_reply": done_preview,
+                    },
+                )
                 working.append(
                     {
                         "role": "tool",

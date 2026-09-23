@@ -49,6 +49,11 @@ async def _lifespan(_app: FastAPI):
             root.mkdir(parents=True, exist_ok=True)
         except OSError:
             pass
+    try:
+        from app import bots_store
+        bots_store.bots_path().parent.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        pass
     await jobstore.recover_queued_jobs()
     yield
 
@@ -196,6 +201,34 @@ async def media_upload(name: str) -> FileResponse:
 
     media, _ = mimetypes.guess_type(name)
     return FileResponse(path, media_type=media or "application/octet-stream", filename=name)
+
+
+
+@app.get("/api/desktop/view.png")
+async def desktop_view_png() -> Response:
+    """Fresh desktop screenshot as PNG — mobile compat view when noVNC stalls."""
+    settings = get_settings()
+    upstream = f"{settings.desktop_api_url.rstrip('/')}/screenshot"
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(20.0, connect=8.0)) as client:
+            resp = await client.post(upstream)
+            if resp.status_code >= 400:
+                raise HTTPException(status_code=502, detail="screenshot failed")
+            data = resp.json()
+            rel = str(data.get("path") or "")
+            name = Path(rel).name
+            if not name or ".." in name:
+                raise HTTPException(status_code=502, detail="bad screenshot path")
+            shot = (settings.workspace_path / "screenshots" / name).resolve()
+            root = (settings.workspace_path / "screenshots").resolve()
+            if not str(shot).startswith(str(root)) or not shot.is_file():
+                raise HTTPException(status_code=404, detail="screenshot missing")
+            return FileResponse(shot, media_type="image/png", headers={"Cache-Control": "no-store"})
+    except HTTPException:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("desktop view png failed: %s", exc)
+        raise HTTPException(status_code=502, detail="desktop view unavailable") from exc
 
 
 @app.get("/api/media/screenshots/{name}")
@@ -737,7 +770,8 @@ async def api_job_events(job_id: str, request: Request) -> StreamingResponse:
     async def event_gen():
         last_status = None
         last_reply = None
-        for _ in range(1800):  # ~30 min at 1s
+        last_events = -1
+        for _ in range(3600):  # ~30 min at 0.5s
             if await request.is_disconnected():
                 break
             current = jobstore.load_job(job_id)
@@ -746,14 +780,16 @@ async def api_job_events(job_id: str, request: Request) -> StreamingResponse:
                 break
             status = current.get("status")
             reply = current.get("reply") or current.get("partial_reply") or ""
-            if status != last_status or reply != last_reply:
+            n_events = len(current.get("events") or [])
+            if status != last_status or reply != last_reply or n_events != last_events:
                 payload = json.dumps(jobstore.public_job(current), ensure_ascii=False)
                 yield f"event: job\ndata: {payload}\n\n"
                 last_status = status
                 last_reply = reply
+                last_events = n_events
             if status in ("completed", "failed", "cancelled"):
                 break
-            await asyncio.sleep(1.0)
+            await asyncio.sleep(0.5)
 
     return StreamingResponse(
         event_gen(),
@@ -797,6 +833,24 @@ async def api_get_session(session_id: str) -> dict[str, Any]:
     }
 
 
+class BotsPutBody(BaseModel):
+    bots: list[dict[str, Any]] = Field(default_factory=list)
+
+
+@app.get("/api/bots")
+async def api_get_bots() -> dict[str, Any]:
+    """Durable bot registry (survives refresh / Safari private wipe of localStorage)."""
+    from app import bots_store
+    return bots_store.public_bots_payload()
+
+
+@app.put("/api/bots")
+async def api_put_bots(body: BotsPutBody) -> dict[str, Any]:
+    from app import bots_store
+    saved = bots_store.save_bots(body.bots or [])
+    return bots_store.public_bots_payload(saved)
+
+
 # ---------------------------------------------------------------------------
 # Desktop-api reverse proxy (clipboard / mouse / type) → desktop:7090
 _DESKTOP_PROXY_ALLOW = frozenset({
@@ -807,7 +861,38 @@ _DESKTOP_PROXY_ALLOW = frozenset({
     "hotkey",
     "scroll",
     "mouse",
+    "screenshot",
 })
+
+
+@app.get("/api/desktop/screenshot")
+async def api_desktop_live_screenshot() -> FileResponse:
+    """Capture desktop now and return PNG (compat live-view for mobile when RFB fails)."""
+    settings = get_settings()
+    upstream = f"{settings.desktop_api_url.rstrip('/')}/screenshot"
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(20.0, connect=8.0)) as client:
+            resp = await client.post(upstream)
+    except httpx.ConnectError as exc:
+        raise HTTPException(status_code=502, detail="desktop-api unreachable") from exc
+    if resp.status_code >= 400:
+        raise HTTPException(status_code=502, detail=f"screenshot failed: HTTP {resp.status_code}")
+    try:
+        data = resp.json()
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail="screenshot returned non-JSON") from exc
+    rel = str(data.get("path") or "").lstrip("/")
+    if not rel.startswith("screenshots/") or ".." in rel:
+        raise HTTPException(status_code=502, detail="invalid screenshot path")
+    shot = (settings.workspace_path / rel).resolve()
+    shot_root = (settings.workspace_path / "screenshots").resolve()
+    if not str(shot).startswith(str(shot_root)) or not shot.is_file():
+        raise HTTPException(status_code=404, detail="screenshot file missing")
+    return FileResponse(
+        shot,
+        media_type="image/png",
+        headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"},
+    )
 
 
 @app.api_route(
@@ -924,6 +1009,7 @@ async def novnc_http_proxy(full_path: str, request: Request) -> Response:
 
 @app.websocket("/novnc/{full_path:path}")
 async def novnc_ws_proxy(websocket: WebSocket, full_path: str) -> None:
+    """Binary-only RFB proxy. Avoid ping frames / dual subprotocols that break mobile RFB."""
     base = _novnc_upstream().replace("https://", "wss://").replace("http://", "ws://")
     # Client may request /novnc/websockify — upstream websockify listens at /websockify
     upstream_path = full_path
@@ -937,20 +1023,25 @@ async def novnc_ws_proxy(websocket: WebSocket, full_path: str) -> None:
         if qs:
             target = f"{target}?{qs}"
 
-    subprotocols: list[str] = []
+    # Match binary only — offering base64+binary makes some clients dual-negotiate and corrupt RFB
     proto_header = websocket.headers.get("sec-websocket-protocol")
-    if proto_header:
-        subprotocols = [p.strip() for p in proto_header.split(",") if p.strip()]
-    chosen = subprotocols[0] if subprotocols else None
+    client_protos = [p.strip() for p in proto_header.split(",") if p.strip()] if proto_header else []
+    if client_protos and "binary" not in client_protos:
+        logger.warning("novnc client subprotocols without binary: %s", client_protos)
+    chosen = "binary"
 
     try:
         async with websockets.connect(
             target,
-            subprotocols=subprotocols or None,
+            subprotocols=["binary"],
             open_timeout=15,
             max_size=8 * 1024 * 1024,
+            ping_interval=None,
+            ping_timeout=None,
+            compression=None,
+            max_queue=None,
         ) as upstream:
-            # Accept only after upstream is up, with matching subprotocol for noVNC.
+            # Accept only after upstream is ready (single connection; binary subprotocol)
             await websocket.accept(subprotocol=chosen)
 
             async def client_to_upstream() -> None:
@@ -960,12 +1051,11 @@ async def novnc_ws_proxy(websocket: WebSocket, full_path: str) -> None:
                         if msg["type"] == "websocket.disconnect":
                             break
                         data = msg.get("bytes")
+                        if data is None and msg.get("text") is not None:
+                            # RFB is binary; coerce any text frames to bytes without reinterpret
+                            data = msg["text"].encode("latin-1", errors="replace")
                         if data is not None:
                             await upstream.send(data)
-                            continue
-                        text = msg.get("text")
-                        if text is not None:
-                            await upstream.send(text)
                 except WebSocketDisconnect:
                     pass
                 except Exception:  # noqa: BLE001
@@ -976,16 +1066,20 @@ async def novnc_ws_proxy(websocket: WebSocket, full_path: str) -> None:
                     async for message in upstream:
                         if websocket.client_state != WebSocketState.CONNECTED:
                             break
-                        if isinstance(message, (bytes, bytearray)):
-                            await websocket.send_bytes(message)
-                        else:
-                            await websocket.send_text(str(message))
+                        if isinstance(message, str):
+                            message = message.encode("latin-1", errors="replace")
+                        await websocket.send_bytes(message)
                 except Exception:  # noqa: BLE001
                     logger.debug("upstream_to_client closed", exc_info=True)
 
             await asyncio.gather(client_to_upstream(), upstream_to_client())
     except Exception as exc:  # noqa: BLE001
         logger.warning("novnc websocket proxy failed: %s", exc)
+        if websocket.client_state.name == "CONNECTING":
+            try:
+                await websocket.close(code=1011)
+            except Exception:  # noqa: BLE001
+                pass
     finally:
         if websocket.client_state == WebSocketState.CONNECTED:
             try:
