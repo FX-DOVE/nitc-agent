@@ -367,7 +367,9 @@
     .gesture-layer {
       position: absolute; inset: 0; z-index: 3; touch-action: none;
       background: transparent; -webkit-user-select: none; user-select: none;
+      pointer-events: none; /* only capture after desktop connected */
     }
+    .gesture-layer.active { pointer-events: auto; }
     .trackpad-pointer {
       position: absolute; z-index: 4; width: 22px; height: 22px; margin: -2px 0 0 -2px;
       pointer-events: none; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.55));
@@ -381,6 +383,17 @@
     }
     .desktop-empty.hidden { display: none; }
     .desktop-empty .connecting-label { margin: 0; font-size: 1rem; font-weight: 500; color: var(--text); }
+    .desktop-empty .connecting-error {
+      margin: 0; font-size: 0.85rem; color: #f87171; max-width: 280px; line-height: 1.35;
+    }
+    .desktop-empty .connecting-error.hidden { display: none; }
+    .desktop-retry-btn {
+      margin-top: 4px; padding: 10px 22px; border-radius: 12px; border: 0;
+      background: #3b82f6; color: #fff; font-size: 0.95rem; font-weight: 600; cursor: pointer;
+    }
+    .desktop-retry-btn:active { opacity: 0.85; }
+    .desktop-retry-btn.hidden { display: none; }
+    .desktop-empty.is-error .spinner { display: none; }
     .spinner {
       width: 36px; height: 36px; border-radius: 50%;
       border: 2.5px solid rgba(255,255,255,0.15); border-top-color: rgba(255,255,255,0.85);
@@ -968,7 +981,9 @@
           </div>
           <div class="desktop-empty" id="desktop-empty">
             <div class="spinner" aria-hidden="true"></div>
-            <p class="connecting-label">Connecting...</p>
+            <p class="connecting-label" id="desktop-connecting-label">Connecting...</p>
+            <p class="connecting-error hidden" id="desktop-connect-error" role="alert"></p>
+            <button type="button" class="desktop-retry-btn hidden" id="desktop-retry">Retry</button>
             <button type="button" class="sr-only" id="novnc-connect">Connect</button>
             <button type="button" class="sr-only" id="novnc-connect-2">Connect desktop</button>
           </div>
@@ -1167,6 +1182,11 @@
     let pendingAttachments = [];
     let novncEmbed = "";
     let computerLoaded = false;
+    let desktopConnectPending = false;
+    let desktopConnected = false;
+    let desktopHealthPollId = null;
+    let desktopHealthOk = false;
+    let desktopConnectGen = 0;
     let sending = false;
     let modalMode = "bot"; // bot | group
     let screenW = 1280;
@@ -1938,8 +1958,8 @@
         closeHelpSheet();
       }
       if (name === "computer") {
-        if (!computerLoaded) desktopEmpty.classList.remove("hidden");
-        if (novncEmbed) setTimeout(() => connectDesktop(), computerLoaded ? 0 : 400);
+        if (!computerLoaded || !desktopConnected) showDesktopConnecting();
+        setTimeout(() => connectDesktop({ reason: "open-computer" }), computerLoaded ? 0 : 400);
         refreshDesktopHealth();
         applyTrackpadUI();
         applyZoomTransform();
@@ -1947,13 +1967,132 @@
       if (name === "bots") renderBotsList();
     }
 
-    function connectDesktop() {
-      if (!novncEmbed) return;
-      novncFrame.src = novncEmbed;
+    function setGestureLayerActive(on) {
+      if (!gestureLayer) return;
+      gestureLayer.classList.toggle("active", !!on);
+      gestureLayer.setAttribute("aria-hidden", on ? "false" : "true");
+    }
+
+    function showDesktopConnecting(msg) {
+      if (!desktopEmpty) return;
+      desktopEmpty.classList.remove("hidden", "is-error");
+      const label = document.getElementById("desktop-connecting-label");
+      if (label) label.textContent = msg || "Connecting...";
+      const err = document.getElementById("desktop-connect-error");
+      if (err) { err.textContent = ""; err.classList.add("hidden"); }
+      const retry = document.getElementById("desktop-retry");
+      if (retry) retry.classList.add("hidden");
+      setGestureLayerActive(false);
+    }
+
+    function showDesktopConnectError(msg) {
+      if (!desktopEmpty) return;
+      desktopEmpty.classList.remove("hidden");
+      desktopEmpty.classList.add("is-error");
+      const label = document.getElementById("desktop-connecting-label");
+      if (label) label.textContent = "Could not connect";
+      const err = document.getElementById("desktop-connect-error");
+      if (err) {
+        err.textContent = msg || "Desktop health check failed. Tap Retry.";
+        err.classList.remove("hidden");
+      }
+      const retry = document.getElementById("desktop-retry");
+      if (retry) retry.classList.remove("hidden");
+      setGestureLayerActive(false);
+    }
+
+    function hideDesktopEmpty() {
+      if (!desktopEmpty) return;
+      desktopEmpty.classList.add("hidden");
+      desktopEmpty.classList.remove("is-error");
+      desktopConnected = true;
+      setGestureLayerActive(true);
+      stopDesktopHealthPoll();
+    }
+
+    function stopDesktopHealthPoll() {
+      if (desktopHealthPollId) {
+        clearInterval(desktopHealthPollId);
+        desktopHealthPollId = null;
+      }
+    }
+
+    function startDesktopHealthPoll(gen) {
+      stopDesktopHealthPoll();
+      desktopHealthPollId = setInterval(async () => {
+        if (gen !== desktopConnectGen) return;
+        if (!desktopEmpty || desktopEmpty.classList.contains("hidden")) {
+          stopDesktopHealthPoll();
+          return;
+        }
+        try {
+          const data = await desktopFetch("health");
+          desktopHealthOk = true;
+          if (data.screen && data.screen.width) {
+            screenW = data.screen.width;
+            screenH = data.screen.height;
+          }
+          // Auto-hide once healthy if iframe already loaded, or retry connect once
+          if (!novncFrame.src || novncFrame.src === "about:blank") {
+            connectDesktop({ reason: "health-poll", force: true });
+          } else if (computerLoaded) {
+            hideDesktopEmpty();
+          }
+        } catch (e) {
+          desktopHealthOk = false;
+          // keep spinning while polling; surface Retry after sustained failure
+          if (!desktopEmpty.classList.contains("is-error")) {
+            showDesktopConnectError((e && e.message) ? e.message : "Desktop offline");
+          }
+        }
+      }, 3000);
+    }
+
+    function connectDesktop(opts) {
+      opts = opts || {};
+      // Queue until /api/config resolves novncEmbed — do not silently no-op
+      if (!novncEmbed) {
+        desktopConnectPending = true;
+        showDesktopConnecting("Connecting...");
+        return;
+      }
+      desktopConnectPending = false;
+      const gen = ++desktopConnectGen;
+      desktopConnected = false;
+      showDesktopConnecting();
+      const sep = novncEmbed.includes("?") ? "&" : "?";
+      const url = novncEmbed.replace(/([?&])v=\d+/g, "").replace(/[?&]$/, "") + sep + "v=" + Date.now();
+      novncFrame.src = url;
       computerLoaded = true;
-      const hide = () => desktopEmpty.classList.add("hidden");
-      novncFrame.addEventListener("load", hide, { once: true });
-      setTimeout(hide, 2500);
+      setGestureLayerActive(false);
+
+      const onLoad = () => {
+        if (gen !== desktopConnectGen) return;
+        // Prefer health-confirmed hide; still hide on iframe load so UI never sticks
+        hideDesktopEmpty();
+      };
+      novncFrame.addEventListener("load", onLoad, { once: true });
+
+      // Hide after 2s if health is OK (iframe load can be flaky on mobile)
+      setTimeout(async () => {
+        if (gen !== desktopConnectGen) return;
+        if (!desktopEmpty || desktopEmpty.classList.contains("hidden")) return;
+        try {
+          const data = await desktopFetch("health");
+          desktopHealthOk = true;
+          if (data.screen && data.screen.width) {
+            screenW = data.screen.width;
+            screenH = data.screen.height;
+          }
+          hideDesktopEmpty();
+        } catch (e) {
+          desktopHealthOk = false;
+          showDesktopConnectError((e && e.message) ? e.message : "Desktop health failed");
+          startDesktopHealthPoll(gen);
+        }
+      }, 2000);
+
+      startDesktopHealthPoll(gen);
     }
 
     /* —— Computer chrome: gestures, trackpad, clipboard, keyboard —— */
@@ -2076,11 +2215,16 @@
     async function refreshDesktopHealth() {
       try {
         const data = await desktopFetch("health");
+        desktopHealthOk = true;
         if (data.screen && data.screen.width) {
           screenW = data.screen.width;
           screenH = data.screen.height;
         }
-      } catch (_) {}
+        return data;
+      } catch (e) {
+        desktopHealthOk = false;
+        return null;
+      }
     }
 
     let mouseQueue = Promise.resolve();
@@ -2945,15 +3089,9 @@
     backdrop.addEventListener("click", closeSidebar);
     document.getElementById("novnc-connect").addEventListener("click", connectDesktop);
     document.getElementById("novnc-connect-2").addEventListener("click", connectDesktop);
-    novncReload.addEventListener("click", () => {
-      if (novncEmbed) {
-        desktopEmpty.classList.remove("hidden");
-        novncFrame.src = novncEmbed;
-        computerLoaded = true;
-        const hide = () => desktopEmpty.classList.add("hidden");
-        novncFrame.addEventListener("load", hide, { once: true });
-        setTimeout(hide, 2500);
-      }
+    novncReload.addEventListener("click", () => connectDesktop({ reason: "reload" }));
+    document.getElementById("desktop-retry")?.addEventListener("click", () => {
+      connectDesktop({ reason: "retry", force: true });
     });
     initComputerChrome();
 
@@ -3002,6 +3140,10 @@
         if (novncOpen) novncOpen.href = novncEmbed;
       }
       refreshDesktopHealth();
+      // If user opened Computer before config resolved, connect now
+      if (desktopConnectPending || (document.getElementById("view-computer")?.classList.contains("active") && !desktopConnected)) {
+        connectDesktop({ reason: "config-ready" });
+      }
     }
 
     async function refreshHealth() {
