@@ -348,7 +348,7 @@ def _emit(on_event: Any, payload: dict[str, Any]) -> None:
     try:
         on_event(payload)
     except Exception:
-        pass
+        logger.exception("on_event sink failed type=%s", (payload or {}).get("type"))
 
 
 async def chat(

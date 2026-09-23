@@ -361,33 +361,34 @@ async def _run_job(job_id: str) -> None:
         instructions = job.get("instructions") or ""
 
         def _on_event(ev: dict[str, Any]) -> None:
-            cur = load_job(job_id)
-            if not cur:
-                return
-            et = str(ev.get("type") or "progress")
-            if et == "tool_result" and cur.get("status") == "awaiting_approval":
-                cur["status"] = "running"
-            msg = str(ev.get("message") or "")[:500]
-            partial = ev.get("partial_reply")
-            if partial is not None:
-                cur["partial_reply"] = str(partial)[:12000]
-            elif msg:
-                # Keep prior assistant draft if present; otherwise show status
-                prev = (cur.get("partial_reply") or "").strip()
-                if not prev or prev.startswith("Thinking") or prev.startswith("Working") or prev.startswith("Using ") or prev.startswith("Finished ") or prev.startswith("Auto-review"):
-                    cur["partial_reply"] = msg
-                else:
-                    # Append italic status under existing draft
-                    base = prev.split("\n\n_")[0].rstrip()
-                    cur["partial_reply"] = f"{base}\n\n_{msg}_"
-            append_event(
-                cur,
-                et,
-                message=msg or None,
-                tool=ev.get("tool"),
-                ok=ev.get("ok"),
-            )
-            save_job(cur)
+            try:
+                cur = load_job(job_id)
+                if not cur:
+                    return
+                et = str(ev.get("type") or "progress")
+                if et == "tool_result" and cur.get("status") == "awaiting_approval":
+                    cur["status"] = "running"
+                msg = str(ev.get("message") or "")[:500]
+                partial = ev.get("partial_reply")
+                if partial is not None:
+                    cur["partial_reply"] = str(partial)[:12000]
+                elif msg:
+                    prev = (cur.get("partial_reply") or "").strip()
+                    if not prev or prev.startswith("Thinking") or prev.startswith("Working") or prev.startswith("Using ") or prev.startswith("Finished ") or prev.startswith("Auto-review"):
+                        cur["partial_reply"] = msg
+                    else:
+                        base = prev.split("\n\n_")[0].rstrip()
+                        cur["partial_reply"] = f"{base}\n\n_{msg}_"
+                append_event(
+                    cur,
+                    et,
+                    message=msg or None,
+                    tool=ev.get("tool"),
+                    ok=ev.get("ok"),
+                )
+                save_job(cur)
+            except Exception:
+                logger.exception("job %s on_event failed", job_id)
 
         result = await agent_chat(
             messages,
